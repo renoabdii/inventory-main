@@ -11,6 +11,7 @@ const purchaseOrderRoutes = require('./purchaseOrder');
 const dashboardRoutes = require('./dashboard');
 const reportRoutes = require('./report');
 const forecastRoutes = require('./forecast');
+const transactionRoutes = require('./transaction');
 
 // Auth routes
 router.use('/auth', authRoutes);
@@ -44,5 +45,8 @@ router.use('/reports', reportRoutes);
 
 // Forecast routes
 router.use('/forecast', forecastRoutes);
+
+// Transaction routes
+router.use('/transactions', transactionRoutes);
 
 module.exports = router;

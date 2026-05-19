@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import TablePagination from "@/components/TablePagination";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +98,7 @@ const getStatusBadge = (status: string) => {
 ========================= */
 
 const IncomingItems = () => {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -257,17 +259,19 @@ const IncomingItems = () => {
   };
 
   /* =========================
-     HANDLE UPDATE STATUS
+     HANDLE UPDATE STATUS (FSM)
   ========================= */
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  const handleUpdateStatus = async (id: string, event: string) => {
     if (!token) return;
 
-    const confirmMsg =
-      newStatus === "completed"
+    const confirmed = await confirm({
+      title: "Update Status",
+      description: event === "complete"
         ? "Selesaikan penerimaan ini? Stock produk akan otomatis bertambah."
-        : "Ubah status ke Proses?";
-
-    if (!confirm(confirmMsg)) return;
+        : "Ubah status ke Proses?",
+      confirmText: "Ya, Lanjutkan",
+    });
+    if (!confirmed) return;
 
     try {
       const res = await fetch(`${API_URL}/api/incoming-items/${id}/status`, {
@@ -276,7 +280,7 @@ const IncomingItems = () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ event }),
       });
       const json = await res.json();
       if (json.success) {
@@ -295,7 +299,13 @@ const IncomingItems = () => {
      HANDLE DELETE
   ========================= */
   const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus penerimaan ini?")) return;
+    const confirmed = await confirm({
+      title: "Hapus Penerimaan",
+      description: "Yakin ingin menghapus penerimaan ini?",
+      confirmText: "Ya, Hapus",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
     if (!token) return;
 
     try {
@@ -549,7 +559,7 @@ const IncomingItems = () => {
                               {item.status === "pending" && (
                                 <DropdownMenuItem
                                   className="gap-2"
-                                  onClick={() => handleUpdateStatus(item._id, "in_progress")}
+                                  onClick={() => handleUpdateStatus(item._id, "process")}
                                 >
                                   <Clock className="w-4 h-4" />
                                   Proses
@@ -558,7 +568,7 @@ const IncomingItems = () => {
                               {(item.status === "pending" || item.status === "in_progress") && (
                                 <DropdownMenuItem
                                   className="gap-2"
-                                  onClick={() => handleUpdateStatus(item._id, "completed")}
+                                  onClick={() => handleUpdateStatus(item._id, "complete")}
                                 >
                                   <CheckCircle className="w-4 h-4" />
                                   Selesaikan
@@ -601,6 +611,7 @@ const IncomingItems = () => {
           </CardContent>
         </Card>
       </div>
+      <ConfirmDialogComponent />
     </DashboardLayout>
   );
 };

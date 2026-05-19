@@ -1,73 +1,128 @@
-# Welcome to your Lovable project
+# InventoryPro - Sistem Manajemen Inventory Swalayan
 
-## Project info
+Aplikasi manajemen inventory untuk swalayan/minimarket dengan fitur prediksi stok menggunakan LSTM (Deep Learning). Terdiri dari panel Admin (gudang) dan panel Kasir (penjualan).
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Fitur Utama
 
-## How can I edit this code?
+### Admin Panel
+- **Dashboard** — Ringkasan inventory real-time (total produk, stock kritis, movement)
+- **Produk** — CRUD barang dengan kategori, SKU, harga, dan monitoring stock
+- **Kategori** — Kelola kategori produk
+- **Barang Masuk** — Catat penerimaan dari supplier, otomatis update stock
+- **Stock Movement** — Riwayat pergerakan stok (masuk/keluar) dengan audit trail
+- **Supplier** — Kelola data supplier
+- **Purchase Order** — Buat PO ke supplier dengan status flow (Pending → Approved → Shipping → Completed)
+- **Laporan** — Report inventory per periode (minggu/bulan) + nilai inventory per kategori
+- **Prediksi Stock (LSTM)** — Prediksi kapan stock habis menggunakan AI/Deep Learning
+- **Notifikasi** — Alert real-time untuk stock kritis dan PO pending
 
-There are several ways of editing your application.
+### Kasir Panel
+- **Dashboard** — Ringkasan penjualan hari ini
+- **POS (Point of Sale)** — Input transaksi penjualan dengan keranjang belanja
+- **Riwayat Transaksi** — List semua transaksi yang dilakukan
+- **Cek Stok** — Lihat ketersediaan produk (read-only)
+- **Profil** — Ubah password akun
 
-**Use Lovable**
+## Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+### Frontend
+- React + TypeScript
+- Vite
+- Tailwind CSS
+- shadcn/ui
+- Sonner (toast notifications)
+- React Router DOM
 
-Changes made via Lovable will be committed automatically to this repo.
+### Backend
+- Node.js + Express
+- MongoDB + Mongoose
+- JWT Authentication
+- Python + TensorFlow/Keras (LSTM Prediction)
 
-**Use your preferred IDE**
+## Instalasi
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Prerequisites
+- Node.js >= 18
+- MongoDB (atau MongoDB Atlas)
+- Python >= 3.10 (untuk fitur LSTM)
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Frontend
 
-Follow these steps:
+```bash
+# Install dependencies
+npm install
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Jalankan development server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Backend
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+cd kirobackend
 
-**Use GitHub Codespaces**
+# Install dependencies
+npm install
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+# Copy environment file
+cp .env.example .env
+# Edit .env sesuai konfigurasi MongoDB kamu
 
-## What technologies are used for this project?
+# Jalankan seeder (data awal)
+node src/seeders/adminSeeder.js
+node src/seeders/kasirSeeder.js
+node src/seeders/allSeeder.js
 
-This project is built with:
+# Jalankan server
+node src/index.js
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Python (untuk LSTM Prediction)
 
-## How can I deploy this project?
+```bash
+cd kirobackend/src/forecast
+pip install -r requirements.txt
+```
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Akun Default
 
-## Can I connect a custom domain to my Lovable project?
+| Role | Username | Password |
+|------|----------|----------|
+| Admin | admin | admin123 |
+| Kasir | kasir1 | kasir123 |
 
-Yes, you can!
+## Struktur Project
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```
+├── src/                    # Frontend (React)
+│   ├── pages/             # Halaman aplikasi
+│   │   ├── cassier/       # Halaman kasir (POS, Transaksi, dll)
+│   │   └── ...            # Halaman admin
+│   └── components/        # Komponen reusable
+├── kirobackend/           # Backend (Node.js)
+│   └── src/
+│       ├── controllers/   # Logic bisnis
+│       ├── models/        # Schema MongoDB
+│       ├── routes/        # API endpoints
+│       ├── middlewares/   # Auth & error handling
+│       ├── seeders/       # Data awal
+│       └── forecast/      # LSTM prediction (Python)
+└── public/                # Static assets
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## API Endpoints
+
+| Module | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| Auth | POST /api/auth/login | Login |
+| Products | GET/POST/PUT/DELETE /api/products | CRUD Produk |
+| Categories | GET/POST/PUT/DELETE /api/categories | CRUD Kategori |
+| Suppliers | GET/POST/PUT/DELETE /api/suppliers | CRUD Supplier |
+| Purchase Orders | GET/POST/PATCH/DELETE /api/purchase-orders | Kelola PO |
+| Incoming Items | GET/POST/PATCH/DELETE /api/incoming-items | Penerimaan Barang |
+| Stock Movements | GET/POST /api/stock-movements | Pergerakan Stok |
+| Transactions | GET/POST /api/transactions | Transaksi Kasir |
+| Dashboard | GET /api/dashboard/summary | Summary Dashboard |
+| Notifications | GET /api/dashboard/notifications | Notifikasi |
+| Reports | GET /api/reports | Laporan |
+| Forecast | GET /api/forecast | Prediksi LSTM |

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 const API_URL = "http://localhost:3000";
@@ -109,6 +110,7 @@ const getStatusBadge = (status: string) => {
 ========================= */
 
 const Suppliers = () => {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -228,7 +230,13 @@ const Suppliers = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus supplier ini?")) return;
+    const confirmed = await confirm({
+      title: "Hapus Supplier",
+      description: "Yakin ingin menghapus supplier ini?",
+      confirmText: "Ya, Hapus",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
     if (!token) return;
 
     try {
@@ -473,6 +481,7 @@ const Suppliers = () => {
           </DialogContent>
         </Dialog>
       </div>
+      <ConfirmDialogComponent />
     </DashboardLayout>
   );
 };

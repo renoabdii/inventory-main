@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 const API_URL = "http://localhost:3000";
@@ -107,6 +108,7 @@ const getStatusBadge = (status: string) => {
 ========================= */
 
 const Category = () => {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -269,7 +271,13 @@ const Category = () => {
   ========================= */
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus kategori ini?")) return;
+    const confirmed = await confirm({
+      title: "Hapus Kategori",
+      description: "Yakin ingin menghapus kategori ini?",
+      confirmText: "Ya, Hapus",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     if (!token) {
       toast.error("Token tidak ditemukan. Silakan login kembali.");
@@ -641,6 +649,7 @@ const Category = () => {
           </DialogContent>
         </Dialog>
       </div>
+      <ConfirmDialogComponent />
     </DashboardLayout>
   );
 };

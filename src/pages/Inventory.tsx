@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import TablePagination from "@/components/TablePagination";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 const API_URL = "http://localhost:3000";
@@ -130,12 +131,14 @@ interface ProductItem {
 }
 
 const Inventory = () => {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [inventoryData, setInventoryData] = useState<ProductItem[]>([]);
+  const [lowStockData, setLowStockData] = useState<ProductItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [stats, setStats] = useState({ total: 0, lowStock: 0, criticalStock: 0, totalValue: 0 });
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
@@ -174,7 +177,7 @@ const Inventory = () => {
       if (searchQuery) params.append("search", searchQuery);
       if (categoryFilter !== "all") params.append("category", categoryFilter);
       params.append("page", String(currentPage));
-      params.append("limit", "5");
+      params.append("limit", "10");
 
       const res = await fetch(`${API_URL}/api/products?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -218,10 +221,29 @@ const Inventory = () => {
   };
 
   /* =========================
+     FETCH LOW STOCK
+  ========================= */
+  const fetchLowStock = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/products/low-stock`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) {
+        setLowStockData(json.data);
+      }
+    } catch (error) {
+      console.error("Error fetching low stock:", error);
+    }
+  };
+
+  /* =========================
      USEEFFECT - FETCH CATEGORIES
   ========================= */
   useEffect(() => {
     fetchCategories();
+    fetchLowStock();
   }, [token]);
 
   /* =========================
@@ -306,7 +328,13 @@ const Inventory = () => {
      HANDLE DELETE
   ========================= */
   const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus barang ini?")) return;
+    const confirmed = await confirm({
+      title: "Hapus Barang",
+      description: "Yakin ingin menghapus barang ini?",
+      confirmText: "Ya, Hapus",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     if (!token) {
       toast.error("Token tidak ditemukan. Silakan login kembali.");
@@ -507,13 +535,8 @@ const Inventory = () => {
                 Low Stock Alerts
               </h3>
 
-              {inventoryData
-                .filter(
-                  (item) =>
-                    item.status === "low" ||
-                    item.status === "critical"
-                )
-                .map((item) => (
+              {lowStockData.length > 0 ? (
+                lowStockData.map((item) => (
                   <div
                     key={item._id}
                     className="flex items-center justify-between rounded-xl border bg-background p-3"
@@ -532,7 +555,10 @@ const Inventory = () => {
                       {item.stock} tersisa
                     </Badge>
                   </div>
-                ))}
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">Semua stok aman 🎉</p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1122,6 +1148,7 @@ const Inventory = () => {
           </div>
         </DialogContent>
       </Dialog>
+      <ConfirmDialogComponent />
     </DashboardLayout>
   );
 };

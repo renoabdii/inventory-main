@@ -1,13 +1,11 @@
 const IncomingItem = require('../models/IncomingItem');
 const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
+const { incomingItemFSM, productStockFSM, validateTransition, getAvailableEvents } = require('../fsm');
 
-// Helper: hitung status stok berdasarkan stock vs minStock
+// Helper: hitung status stok menggunakan FSM
 const getStockState = (stock, minStock) => {
-  if (stock <= 0) return 'OUT_OF_STOCK';
-  if (stock <= minStock * 0.25) return 'CRITICAL';
-  if (stock <= minStock) return 'LOW';
-  return 'NORMAL';
+  return productStockFSM.computeState(stock, minStock);
 };
 
 // Get semua incoming items
@@ -136,33 +134,27 @@ const create = async (req, res, next) => {
   }
 };
 
-// Update status penerimaan (pending -> in_progress -> completed)
-// Saat completed: update stock produk & catat stock movement
+// Update status penerimaan menggunakan FSM
+// Event: process, complete
 const updateStatus = async (req, res, next) => {
   try {
-    const { status } = req.body;
+    const { event } = req.body;
     const incomingItem = await IncomingItem.findById(req.params.id);
 
     if (!incomingItem) {
       return res.status(404).json({ success: false, message: 'Penerimaan tidak ditemukan' });
     }
 
-    // Validasi transisi status
-    const validTransitions = {
-      pending: ['in_progress', 'completed'],
-      in_progress: ['completed'],
-      completed: [],
-    };
-
-    if (!validTransitions[incomingItem.status].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Tidak bisa mengubah status dari ${incomingItem.status} ke ${status}`,
-      });
+    // Validasi transisi menggunakan FSM
+    const transition = validateTransition(incomingItemFSM, incomingItem.status, event);
+    if (!transition.valid) {
+      return res.status(400).json({ success: false, message: transition.message });
     }
 
+    const newStatus = transition.nextState;
+
     // Jika completed: update stock & catat movement
-    if (status === 'completed') {
+    if (newStatus === 'completed') {
       for (const item of incomingItem.items) {
         const product = await Product.findById(item.product);
         if (!product) continue;
@@ -199,10 +191,13 @@ const updateStatus = async (req, res, next) => {
       }
     }
 
-    incomingItem.status = status;
+    incomingItem.status = newStatus;
     await incomingItem.save();
 
-    res.json({ success: true, data: incomingItem });
+    // Return available next events
+    const availableEvents = getAvailableEvents(incomingItemFSM, newStatus);
+
+    res.json({ success: true, data: incomingItem, availableEvents });
   } catch (error) {
     next(error);
   }

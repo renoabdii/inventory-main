@@ -3,7 +3,10 @@ const router = express.Router();
 const userController = require('../controllers/userController');
 const { authenticate, authorize } = require('../middlewares/auth');
 
-// Semua route user butuh login + role admin
+// Change password - accessible by any logged in user
+router.put('/change-password', authenticate, userController.changePassword);
+
+// Admin-only routes
 router.use(authenticate, authorize('admin'));
 
 router.get('/', userController.getAll);

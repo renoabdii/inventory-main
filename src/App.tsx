@@ -6,6 +6,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import DashboardKasir from "./pages/cassier/Dashboard";
+import POS from "./pages/cassier/POS";
+import Transactions from "./pages/cassier/Transactions";
+import CashierStock from "./pages/cassier/Stock";
+import CashierProfile from "./pages/cassier/Profile";
 import Inventory from "./pages/Inventory";
 import IncomingItems from "./pages/IncomingItems";
 import AnomalyDetection from "./pages/AnomalyDetection";
@@ -32,6 +36,10 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/kasir" element={<DashboardKasir />} />
+          <Route path="/kasir/pos" element={<POS />} />
+          <Route path="/kasir/transactions" element={<Transactions />} />
+          <Route path="/kasir/stock" element={<CashierStock />} />
+          <Route path="/kasir/profile" element={<CashierProfile />} />
           <Route path="/dashboard/kasir" element={<DashboardKasir />} />
           <Route path="/dashboard/inventory" element={<Inventory />} />
           <Route path="/dashboard/incoming" element={<IncomingItems />} />

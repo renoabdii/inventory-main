@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 const API_URL = "http://localhost:3000";
@@ -169,6 +170,7 @@ const formatCurrency = (value: number) => {
 ========================= */
 
 const PurchaseOrders = () => {
+  const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrderData[]>([]);
@@ -319,22 +321,29 @@ const PurchaseOrders = () => {
     }
   };
 
-  /* UPDATE STATUS */
-  const handleUpdateStatus = async (id: string, newStatus: string) => {
+  /* UPDATE STATUS via FSM event */
+  const handleUpdateStatus = async (id: string, event: string) => {
     const messages: Record<string, string> = {
-      APPROVED: "Approve PO ini?",
-      SHIPPING: "Ubah status ke Shipping?",
-      COMPLETED: "Selesaikan PO ini? Stock produk akan otomatis bertambah.",
-      CANCELLED: "Batalkan PO ini?",
+      approve: "Approve PO ini?",
+      ship: "Ubah status ke Shipping?",
+      complete: "Selesaikan PO ini? Stock produk akan otomatis bertambah.",
+      cancel: "Batalkan PO ini?",
     };
-    if (!confirm(messages[newStatus] || "Ubah status?")) return;
+
+    const confirmed = await confirm({
+      title: "Update Status",
+      description: messages[event] || "Ubah status?",
+      confirmText: event === "cancel" ? "Ya, Batalkan" : "Ya, Lanjutkan",
+      variant: event === "cancel" ? "destructive" : "default",
+    });
+    if (!confirmed) return;
     if (!token) return;
 
     try {
       const res = await fetch(`${API_URL}/api/purchase-orders/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ event }),
       });
       const json = await res.json();
       if (json.success) {
@@ -351,7 +360,13 @@ const PurchaseOrders = () => {
 
   /* DELETE */
   const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus PO ini?")) return;
+    const confirmed = await confirm({
+      title: "Hapus Purchase Order",
+      description: "Yakin ingin menghapus PO ini?",
+      confirmText: "Ya, Hapus",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
     if (!token) return;
 
     try {
@@ -372,12 +387,20 @@ const PurchaseOrders = () => {
     }
   };
 
-  /* Next status options */
-  const getNextStatuses = (current: string) => {
-    const map: Record<string, string[]> = {
-      PENDING: ["APPROVED", "CANCELLED"],
-      APPROVED: ["SHIPPING", "CANCELLED"],
-      SHIPPING: ["COMPLETED"],
+  /* FSM events per status */
+  const getAvailableEvents = (current: string) => {
+    const map: Record<string, { event: string; label: string }[]> = {
+      PENDING: [
+        { event: "approve", label: "Approve" },
+        { event: "cancel", label: "Batalkan" },
+      ],
+      APPROVED: [
+        { event: "ship", label: "Shipping" },
+        { event: "cancel", label: "Batalkan" },
+      ],
+      SHIPPING: [
+        { event: "complete", label: "Selesai" },
+      ],
       COMPLETED: [],
       CANCELLED: [],
     };
@@ -590,14 +613,14 @@ const PurchaseOrders = () => {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {getNextStatuses(item.status).map((nextStatus) => (
+                              {getAvailableEvents(item.status).map((action) => (
                                 <DropdownMenuItem
-                                  key={nextStatus}
+                                  key={action.event}
                                   className="gap-2"
-                                  onClick={() => handleUpdateStatus(item._id, nextStatus)}
+                                  onClick={() => handleUpdateStatus(item._id, action.event)}
                                 >
                                   <ArrowRight className="w-4 h-4" />
-                                  {nextStatus}
+                                  {action.label}
                                 </DropdownMenuItem>
                               ))}
                               {item.status === "PENDING" && (
@@ -634,6 +657,7 @@ const PurchaseOrders = () => {
           </CardContent>
         </Card>
       </div>
+      <ConfirmDialogComponent />
     </DashboardLayout>
   );
 };

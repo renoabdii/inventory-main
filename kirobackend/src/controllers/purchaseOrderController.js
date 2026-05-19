@@ -3,13 +3,11 @@ const Supplier = require('../models/Supplier');
 const Product = require('../models/Product');
 const IncomingItem = require('../models/IncomingItem');
 const StockMovement = require('../models/StockMovement');
+const { purchaseOrderFSM, productStockFSM, validateTransition, getAvailableEvents } = require('../fsm');
 
-// Helper: hitung status stok
+// Helper: hitung status stok menggunakan FSM
 const getStockState = (stock, minStock) => {
-  if (stock <= 0) return 'OUT_OF_STOCK';
-  if (stock <= minStock * 0.25) return 'CRITICAL';
-  if (stock <= minStock) return 'LOW';
-  return 'NORMAL';
+  return productStockFSM.computeState(stock, minStock);
 };
 
 // Get semua purchase orders
@@ -151,37 +149,27 @@ const create = async (req, res, next) => {
   }
 };
 
-// Update status PO
-// PENDING -> APPROVED -> SHIPPING -> COMPLETED
-// Saat COMPLETED: otomatis buat IncomingItem + update stock + catat StockMovement
+// Update status PO menggunakan FSM
+// Event: approve, ship, complete, cancel
 const updateStatus = async (req, res, next) => {
   try {
-    const { status } = req.body;
+    const { event } = req.body;
     const order = await PurchaseOrder.findById(req.params.id).populate('supplier', 'name');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Purchase Order tidak ditemukan' });
     }
 
-    // Validasi transisi status
-    const validTransitions = {
-      PENDING: ['APPROVED', 'CANCELLED'],
-      APPROVED: ['SHIPPING', 'CANCELLED'],
-      SHIPPING: ['COMPLETED'],
-      COMPLETED: [],
-      CANCELLED: [],
-    };
-
-    if (!validTransitions[order.status].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Tidak bisa mengubah status dari ${order.status} ke ${status}`,
-      });
+    // Validasi transisi menggunakan FSM
+    const transition = validateTransition(purchaseOrderFSM, order.status, event);
+    if (!transition.valid) {
+      return res.status(400).json({ success: false, message: transition.message });
     }
 
+    const newStatus = transition.nextState;
+
     // Jika COMPLETED: buat incoming item + update stock + catat movement
-    if (status === 'COMPLETED') {
-      // Buat IncomingItem otomatis dari PO
+    if (newStatus === 'COMPLETED') {
       const incomingItems = order.items.map((item) => ({
         product: item.product,
         productName: item.productName,
@@ -232,10 +220,13 @@ const updateStatus = async (req, res, next) => {
       }
     }
 
-    order.status = status;
+    order.status = newStatus;
     await order.save();
 
-    res.json({ success: true, data: order });
+    // Return available next events
+    const availableEvents = getAvailableEvents(purchaseOrderFSM, newStatus);
+
+    res.json({ success: true, data: order, availableEvents });
   } catch (error) {
     next(error);
   }
