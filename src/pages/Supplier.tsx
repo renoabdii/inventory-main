@@ -5,7 +5,7 @@ import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -135,7 +135,7 @@ const Suppliers = () => {
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
-      const res = await fetch(`${API_URL}/api/suppliers?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -177,7 +177,7 @@ const Suppliers = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/suppliers`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(formData),
@@ -205,7 +205,7 @@ const Suppliers = () => {
   const handleUpdate = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/suppliers/${editFormData.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers/${editFormData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -240,7 +240,7 @@ const Suppliers = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/suppliers/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

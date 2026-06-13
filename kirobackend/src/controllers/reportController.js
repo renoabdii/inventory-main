@@ -3,17 +3,25 @@ const StockMovement = require('../models/StockMovement');
 const PurchaseOrder = require('../models/PurchaseOrder');
 const Supplier = require('../models/Supplier');
 const Category = require('../models/Category');
+const Transaction = require('../models/Transaction');
 
 // Get report data
 const getReport = async (req, res, next) => {
   try {
-    const { period } = req.query; // 'week', 'month', 'all'
+    const { period, startDate: customStart, endDate: customEnd } = req.query; // 'week', 'month', 'custom', 'all'
 
     // === Tentukan range waktu ===
     const now = new Date();
     let startDate = new Date(0); // default: semua waktu
 
-    if (period === 'week') {
+    let endDate = now;
+
+    if (period === 'custom' && customStart && customEnd) {
+      startDate = new Date(customStart);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(customEnd);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (period === 'week') {
       startDate = new Date();
       startDate.setDate(startDate.getDate() - 7);
       startDate.setHours(0, 0, 0, 0);
@@ -32,13 +40,16 @@ const getReport = async (req, res, next) => {
 
     const activeSuppliers = await Supplier.countDocuments({ status: 'ACTIVE' });
     const allPO = await PurchaseOrder.find();
-    const completedPOPeriod = allPO.filter(
-      (po) => po.status === 'COMPLETED' && new Date(po.updatedAt) >= startDate
-    ).length;
+    const isInPeriod = (date) => new Date(date) >= startDate && new Date(date) <= endDate;
+    const completedPOPeriod = allPO.filter((po) => po.status === 'COMPLETED' && isInPeriod(po.updatedAt)).length;
 
     // === TOP PRODUCTS (paling banyak keluar) ===
     const movements = await StockMovement.find({
-      createdAt: { $gte: startDate },
+      createdAt: { $gte: startDate, $lte: endDate },
+    });
+
+    const transactions = await Transaction.find({
+      createdAt: { $gte: startDate, $lte: endDate },
     });
 
     const outMovements = movements.filter((m) => m.type === 'OUT');
@@ -111,6 +122,15 @@ const getReport = async (req, res, next) => {
       date: m.createdAt,
     }));
 
+    const paymentSummary = ['cash', 'debit', 'qris'].map((method) => {
+      const methodTransactions = transactions.filter((t) => t.paymentMethod === method);
+      return {
+        method,
+        count: methodTransactions.length,
+        total: methodTransactions.reduce((acc, t) => acc + t.totalAmount, 0),
+      };
+    });
+
     res.json({
       success: true,
       data: {
@@ -129,6 +149,7 @@ const getReport = async (req, res, next) => {
           totalOut: totalStockOut,
           total: totalStockIn + totalStockOut,
         },
+        paymentSummary,
         criticalStock: criticalProducts,
         categoryValues,
         recentActivities,

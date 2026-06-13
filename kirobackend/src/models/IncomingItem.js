@@ -22,12 +22,38 @@ const incomingItemDetailSchema = new mongoose.Schema({
   },
 });
 
+const incomingStatusHistorySchema = new mongoose.Schema(
+  {
+    from: String,
+    to: String,
+    event: String,
+    note: {
+      type: String,
+      trim: true,
+    },
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const incomingItemSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     receiptId: {
       type: String,
       required: [true, 'ID Penerimaan wajib diisi'],
-      unique: true,
       trim: true,
       uppercase: true,
     },
@@ -41,12 +67,22 @@ const incomingItemSchema = new mongoose.Schema(
       required: [true, 'Supplier wajib diisi'],
       trim: true,
     },
+    source: {
+      type: String,
+      enum: ['manual', 'purchase_order'],
+      default: 'manual',
+    },
+    reference: {
+      type: String,
+      trim: true,
+    },
     items: [incomingItemDetailSchema],
     status: {
       type: String,
-      enum: ['pending', 'in_progress', 'completed'],
+      enum: ['pending', 'in_progress', 'completed', 'cancelled', 'rejected'],
       default: 'pending',
     },
+    statusHistory: [incomingStatusHistorySchema],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -68,5 +104,8 @@ incomingItemSchema.virtual('totalItems').get(function () {
 incomingItemSchema.virtual('totalQty').get(function () {
   return this.items.reduce((acc, item) => acc + item.qty, 0);
 });
+
+// Compound index: receiptId unique per userId
+incomingItemSchema.index({ userId: 1, receiptId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('IncomingItem', incomingItemSchema, 'incoming_items');

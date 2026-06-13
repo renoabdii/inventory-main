@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -156,6 +157,7 @@ const getMovementBadge = (type: string) => {
 ========================= */
 
 const StockMovement = () => {
+  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [movementData, setMovementData] = useState<MovementData[]>([]);
@@ -172,6 +174,13 @@ const StockMovement = () => {
 
   const token = localStorage.getItem("token");
 
+  useEffect(() => {
+    const type = new URLSearchParams(location.search).get("type");
+    if (type === "IN" || type === "OUT") {
+      setFilterType(type);
+    }
+  }, [location.search]);
+
   /* =========================
      FETCH MOVEMENTS
   ========================= */
@@ -185,7 +194,7 @@ const StockMovement = () => {
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
-      const res = await fetch(`${API_URL}/api/stock-movements?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/stock-movements?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -210,7 +219,7 @@ const StockMovement = () => {
   const fetchProducts = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/products`, {
+      const res = await fetch(`${API_BASE_URL}/api/products`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -248,7 +257,7 @@ const StockMovement = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/stock-movements/out`, {
+      const res = await fetch(`${API_BASE_URL}/api/stock-movements/out`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

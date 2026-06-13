@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { User, Lock } from "lucide-react";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 const Profile = () => {
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -33,7 +33,7 @@ const Profile = () => {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/users/change-password`, {
+      const res = await fetch(`${API_BASE_URL}/api/users/change-password`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({

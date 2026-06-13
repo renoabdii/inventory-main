@@ -15,6 +15,7 @@ interface ConfirmDialogProps {
   title?: string;
   description: string;
   onConfirm: () => void;
+  onCancel: () => void;
   confirmText?: string;
   cancelText?: string;
   variant?: "default" | "destructive";
@@ -26,6 +27,7 @@ const ConfirmDialog = ({
   title = "Konfirmasi",
   description,
   onConfirm,
+  onCancel,
   confirmText = "Ya, Lanjutkan",
   cancelText = "Batal",
   variant = "default",
@@ -38,7 +40,7 @@ const ConfirmDialog = ({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelText}</AlertDialogCancel>
+          <AlertDialogCancel onClick={onCancel}>{cancelText}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className={variant === "destructive" ? "bg-red-500 hover:bg-red-600" : ""}
@@ -65,6 +67,7 @@ interface ConfirmState {
   confirmText: string;
   variant: "default" | "destructive";
   onConfirm: () => void;
+  onCancel: () => void;
 }
 
 export const useConfirmDialog = () => {
@@ -75,6 +78,7 @@ export const useConfirmDialog = () => {
     confirmText: "Ya, Lanjutkan",
     variant: "default",
     onConfirm: () => {},
+    onCancel: () => {},
   });
 
   const confirm = useCallback(
@@ -95,6 +99,10 @@ export const useConfirmDialog = () => {
             setState((s) => ({ ...s, open: false }));
             resolve(true);
           },
+          onCancel: () => {
+            setState((s) => ({ ...s, open: false }));
+            resolve(false);
+          },
         });
       });
     },
@@ -103,6 +111,7 @@ export const useConfirmDialog = () => {
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      state.onCancel();
       setState((s) => ({ ...s, open: false }));
     }
   };
@@ -116,6 +125,7 @@ export const useConfirmDialog = () => {
       confirmText={state.confirmText}
       variant={state.variant}
       onConfirm={state.onConfirm}
+      onCancel={state.onCancel}
     />
   );
 

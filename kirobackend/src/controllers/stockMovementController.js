@@ -12,8 +12,8 @@ const getStockState = (stock, minStock) => {
 // Get semua stock movement
 const getAll = async (req, res, next) => {
   try {
-    const { search, type, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const { search, type, productId, page = 1, limit = 10 } = req.query;
+    const filter = { userId: req.user.id };
 
     if (search) {
       filter.$or = [
@@ -24,6 +24,10 @@ const getAll = async (req, res, next) => {
 
     if (type && type !== 'all') {
       filter.type = type;
+    }
+
+    if (productId) {
+      filter.product = productId;
     }
 
     const pageNum = parseInt(page);
@@ -38,7 +42,7 @@ const getAll = async (req, res, next) => {
       .limit(limitNum);
 
     // Stats (dari semua data)
-    const allMovements = await StockMovement.find();
+    const allMovements = await StockMovement.find({ userId: req.user.id });
     const stats = {
       total: allMovements.length,
       stockIn: allMovements.filter((m) => m.type === 'IN').length,
@@ -65,7 +69,7 @@ const getAll = async (req, res, next) => {
 // Get by ID
 const getById = async (req, res, next) => {
   try {
-    const movement = await StockMovement.findById(req.params.id)
+    const movement = await StockMovement.findOne({ _id: req.params.id, userId: req.user.id })
       .populate('product', 'name sku stock minStock price category')
       .populate('createdBy', 'username');
 
@@ -84,7 +88,7 @@ const createOut = async (req, res, next) => {
   try {
     const { productId, qty, note } = req.body;
 
-    const product = await Product.findById(productId);
+    const product = await Product.findOne({ _id: productId, userId: req.user.id });
     if (!product) {
       return res.status(404).json({ success: false, message: 'Produk tidak ditemukan' });
     }
@@ -107,6 +111,7 @@ const createOut = async (req, res, next) => {
 
     // Catat movement
     const movement = await StockMovement.create({
+      userId: req.user.id,
       product: product._id,
       productName: product.name,
       sku: product.sku,
@@ -135,7 +140,7 @@ const createIn = async (req, res, next) => {
   try {
     const { productId, qty, note } = req.body;
 
-    const product = await Product.findById(productId);
+    const product = await Product.findOne({ _id: productId, userId: req.user.id });
     if (!product) {
       return res.status(404).json({ success: false, message: 'Produk tidak ditemukan' });
     }
@@ -151,6 +156,7 @@ const createIn = async (req, res, next) => {
 
     // Catat movement
     const movement = await StockMovement.create({
+      userId: req.user.id,
       product: product._id,
       productName: product.name,
       sku: product.sku,

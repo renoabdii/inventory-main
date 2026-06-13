@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Search, Package } from "lucide-react";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(value);
@@ -50,7 +50,7 @@ const Stock = () => {
       params.append("page", String(currentPage));
       params.append("limit", "10");
 
-      const res = await fetch(`${API_URL}/api/products?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/products?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

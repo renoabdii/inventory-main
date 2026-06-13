@@ -1,6 +1,16 @@
 const Transaction = require('../models/Transaction');
 const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
+const CashierShift = require('../models/CashierShift');
+
+// Helper: Get userId untuk filter (admin = own, kasir = admin's)
+const getOwnerUserId = (req) => {
+  if (req.user.role === 'admin') {
+    return req.user.id;
+  } else if (req.user.role === 'kasir') {
+    return req.user.adminId;
+  }
+};
 
 // Helper: hitung status stok
 const getStockState = (stock, minStock) => {
@@ -31,12 +41,17 @@ const create = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Jumlah pembayaran wajib diisi' });
     }
 
+    const userId = getOwnerUserId(req);
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Akun kasir belum terhubung ke admin' });
+    }
+
     // Validate & build items
     const transactionItems = [];
     let totalAmount = 0;
 
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findOne({ _id: item.productId, userId });
       if (!product) {
         return res.status(400).json({ success: false, message: `Produk tidak ditemukan: ${item.productId}` });
       }
@@ -64,9 +79,14 @@ const create = async (req, res, next) => {
     }
 
     const changeAmount = paymentAmount - totalAmount;
+    const activeShift = await CashierShift.findOne({
+      cashier: req.user._id,
+      status: 'open',
+    });
 
     // Create transaction
     const transaction = await Transaction.create({
+      userId,
       invoiceNumber: generateInvoice(),
       items: transactionItems,
       totalAmount,
@@ -74,11 +94,12 @@ const create = async (req, res, next) => {
       changeAmount,
       paymentMethod: paymentMethod || 'cash',
       cashier: req.user._id,
+      shift: activeShift?._id || null,
     });
 
     // Update stock & create stock movements
     for (const item of transactionItems) {
-      const product = await Product.findById(item.product);
+      const product = await Product.findOne({ _id: item.product, userId });
       const stockBefore = product.stock;
       const previousState = getStockState(product.stock, product.minStock);
 
@@ -88,6 +109,7 @@ const create = async (req, res, next) => {
       const newState = getStockState(product.stock, product.minStock);
 
       await StockMovement.create({
+        userId,
         product: product._id,
         productName: product.name,
         sku: product.sku,

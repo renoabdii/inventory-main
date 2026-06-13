@@ -5,7 +5,7 @@ const PurchaseOrder = require('../models/PurchaseOrder');
 const getAll = async (req, res, next) => {
   try {
     const { search, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
 
     if (search) {
       filter.$or = [
@@ -27,13 +27,13 @@ const getAll = async (req, res, next) => {
     // Hitung jumlah PO per supplier
     const suppliersWithCount = await Promise.all(
       suppliers.map(async (sup) => {
-        const poCount = await PurchaseOrder.countDocuments({ supplier: sup._id });
+        const poCount = await PurchaseOrder.countDocuments({ supplier: sup._id, userId: req.user.id });
         return { ...sup.toObject(), totalPO: poCount };
       })
     );
 
     // Stats
-    const allSuppliers = await Supplier.find();
+    const allSuppliers = await Supplier.find({ userId: req.user.id });
     const stats = {
       total: allSuppliers.length,
       active: allSuppliers.filter((s) => s.status === 'ACTIVE').length,
@@ -59,7 +59,7 @@ const getAll = async (req, res, next) => {
 // Get by ID
 const getById = async (req, res, next) => {
   try {
-    const supplier = await Supplier.findById(req.params.id);
+    const supplier = await Supplier.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!supplier) {
       return res.status(404).json({ success: false, message: 'Supplier tidak ditemukan' });
@@ -77,7 +77,7 @@ const getById = async (req, res, next) => {
 const create = async (req, res, next) => {
   try {
     const { supplierId, name, phone, address } = req.body;
-    const supplier = await Supplier.create({ supplierId, name, phone, address });
+    const supplier = await Supplier.create({ supplierId, name, phone, address, userId: req.user.id });
     res.status(201).json({ success: true, data: supplier });
   } catch (error) {
     if (error.code === 11000) {
@@ -95,8 +95,8 @@ const update = async (req, res, next) => {
   try {
     const { name, phone, address, status } = req.body;
 
-    const supplier = await Supplier.findByIdAndUpdate(
-      req.params.id,
+    const supplier = await Supplier.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
       { name, phone, address, status },
       { new: true, runValidators: true }
     );
@@ -114,14 +114,14 @@ const update = async (req, res, next) => {
 // Hapus supplier
 const remove = async (req, res, next) => {
   try {
-    const supplier = await Supplier.findById(req.params.id);
+    const supplier = await Supplier.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!supplier) {
       return res.status(404).json({ success: false, message: 'Supplier tidak ditemukan' });
     }
 
     // Cek apakah masih ada PO yang terkait
-    const poCount = await PurchaseOrder.countDocuments({ supplier: supplier._id });
+    const poCount = await PurchaseOrder.countDocuments({ supplier: supplier._id, userId: req.user.id });
     if (poCount > 0) {
       return res.status(400).json({
         success: false,
@@ -129,7 +129,7 @@ const remove = async (req, res, next) => {
       });
     }
 
-    await Supplier.findByIdAndDelete(req.params.id);
+    await Supplier.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
     res.json({ success: true, message: 'Supplier berhasil dihapus' });
   } catch (error) {
     next(error);

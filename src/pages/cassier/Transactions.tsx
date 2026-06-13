@@ -3,11 +3,12 @@ import CashierLayout from "@/components/layout/CashierLayout";
 import TablePagination from "@/components/TablePagination";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, ShoppingCart } from "lucide-react";
+import { Printer, Search, ShoppingCart } from "lucide-react";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(value);
@@ -15,7 +16,7 @@ const formatCurrency = (value: number) =>
 interface TransactionData {
   _id: string;
   invoiceNumber: string;
-  items: { productName: string; qty: number; price: number; subtotal: number }[];
+  items: { productName: string; sku?: string; qty: number; price: number; subtotal: number }[];
   totalAmount: number;
   paymentAmount: number;
   changeAmount: number;
@@ -33,6 +34,7 @@ const Transactions = () => {
   const [loading, setLoading] = useState(false);
 
   const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || '{"username":"Kasir"}');
 
   const fetchTransactions = async () => {
     if (!token) return;
@@ -43,7 +45,7 @@ const Transactions = () => {
       params.append("page", String(currentPage));
       params.append("limit", "8");
 
-      const res = await fetch(`${API_URL}/api/transactions?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/transactions?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -72,6 +74,78 @@ const Transactions = () => {
       case "qris": return <Badge className="bg-purple-500/10 text-purple-500 border-0">QRIS</Badge>;
       default: return <Badge variant="secondary">{method}</Badge>;
     }
+  };
+
+  const handlePrintReceipt = (transaction: TransactionData) => {
+    const receiptDate = new Date(transaction.createdAt).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const rows = transaction.items
+      .map(
+        (item) => `
+          <tr>
+            <td colspan="3">${item.productName}</td>
+          </tr>
+          <tr>
+            <td>${item.qty} x ${formatCurrency(item.price)}</td>
+            <td></td>
+            <td class="right">${formatCurrency(item.subtotal)}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const printWindow = window.open("", "_blank", "width=380,height=640");
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Nota ${transaction.invoiceNumber}</title>
+          <style>
+            body { font-family: Arial, sans-serif; width: 300px; margin: 0 auto; padding: 16px; color: #111; }
+            h1 { font-size: 18px; margin: 0; text-align: center; }
+            .center { text-align: center; }
+            .muted { color: #555; font-size: 12px; }
+            .line { border-top: 1px dashed #111; margin: 10px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            td { padding: 2px 0; vertical-align: top; }
+            .right { text-align: right; }
+            .total td { font-weight: 700; font-size: 13px; }
+          </style>
+        </head>
+        <body>
+          <h1>Ely Berkah Mart</h1>
+          <div class="center muted">Cetak Ulang Nota</div>
+          <div class="line"></div>
+          <table>
+            <tr><td>No</td><td>:</td><td>${transaction.invoiceNumber}</td></tr>
+            <tr><td>Tanggal</td><td>:</td><td>${receiptDate}</td></tr>
+            <tr><td>Kasir</td><td>:</td><td>${user.username || "-"}</td></tr>
+            <tr><td>Bayar</td><td>:</td><td>${transaction.paymentMethod.toUpperCase()}</td></tr>
+          </table>
+          <div class="line"></div>
+          <table>${rows}</table>
+          <div class="line"></div>
+          <table>
+            <tr class="total"><td>Total</td><td class="right">${formatCurrency(transaction.totalAmount)}</td></tr>
+            <tr><td>Tunai</td><td class="right">${formatCurrency(transaction.paymentAmount)}</td></tr>
+            <tr><td>Kembali</td><td class="right">${formatCurrency(transaction.changeAmount)}</td></tr>
+          </table>
+          <div class="line"></div>
+          <div class="center muted">Terima kasih atas kunjungan Anda</div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
@@ -111,12 +185,13 @@ const Transactions = () => {
                     <TableHead>Bayar</TableHead>
                     <TableHead>Kembalian</TableHead>
                     <TableHead>Metode</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
                     </TableRow>
                   ) : transactions.length > 0 ? (
                     transactions.map((t) => (
@@ -130,11 +205,21 @@ const Transactions = () => {
                         <TableCell>{formatCurrency(t.paymentAmount)}</TableCell>
                         <TableCell className="text-emerald-500">{formatCurrency(t.changeAmount)}</TableCell>
                         <TableCell>{getMethodBadge(t.paymentMethod)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handlePrintReceipt(t)}
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">Belum ada transaksi</TableCell>
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">Belum ada transaksi</TableCell>
                     </TableRow>
                   )}
                 </TableBody>

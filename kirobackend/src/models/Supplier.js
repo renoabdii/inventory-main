@@ -2,10 +2,15 @@ const mongoose = require('mongoose');
 
 const supplierSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     supplierId: {
       type: String,
       required: [true, 'ID Supplier wajib diisi'],
-      unique: true,
       trim: true,
       uppercase: true,
     },
@@ -36,5 +41,8 @@ const supplierSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
+
+// Compound index: supplierId unique per userId
+supplierSchema.index({ userId: 1, supplierId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Supplier', supplierSchema, 'suppliers');

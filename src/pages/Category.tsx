@@ -5,7 +5,7 @@ import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -135,7 +135,7 @@ const Category = () => {
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
-      const res = await fetch(`${API_URL}/api/categories?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -191,7 +191,7 @@ const Category = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/categories`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -240,7 +240,7 @@ const Category = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/categories/${editFormData.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories/${editFormData.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -285,7 +285,7 @@ const Category = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/categories/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

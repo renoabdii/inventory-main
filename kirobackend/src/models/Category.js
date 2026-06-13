@@ -2,10 +2,15 @@ const mongoose = require('mongoose');
 
 const categorySchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: [true, 'Nama kategori wajib diisi'],
-      unique: true,
       trim: true,
     },
     description: {
@@ -25,5 +30,8 @@ const categorySchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 );
+
+// Compound index: name unique per userId
+categorySchema.index({ userId: 1, name: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Category', categorySchema, 'category');

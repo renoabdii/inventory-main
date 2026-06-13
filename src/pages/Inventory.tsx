@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
+import { exportToCsv, exportToStyledXlsx } from "@/lib/export";
 
 import {
   Card,
@@ -63,6 +66,8 @@ import {
   Eye,
   Package,
   AlertTriangle,
+  Download,
+  Upload,
 } from "lucide-react";
 
 /* =========================
@@ -121,6 +126,7 @@ interface ProductItem {
   _id: string;
   name: string;
   sku: string;
+  barcode?: string;
   category: string;
   stock: number;
   minStock: number;
@@ -130,11 +136,41 @@ interface ProductItem {
   updatedAt: string;
 }
 
+interface StockHistoryItem {
+  _id: string;
+  type: string;
+  qty: number;
+  stockBefore: number;
+  stockAfter: number;
+  reference?: string;
+  note?: string;
+  createdAt: string;
+}
+
+interface ImportProductRow {
+  name: string;
+  sku: string;
+  barcode?: string;
+  category: string;
+  stock: number;
+  minStock: number;
+  price: number;
+}
+
+interface ImportErrorRow {
+  row: number;
+  sku?: string;
+  name?: string;
+  errors: string[];
+}
+
 const Inventory = () => {
+  const location = useLocation();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [inventoryData, setInventoryData] = useState<ProductItem[]>([]);
@@ -142,12 +178,17 @@ const Inventory = () => {
   const [categories, setCategories] = useState<string[]>([]);
   const [stats, setStats] = useState({ total: 0, lowStock: 0, criticalStock: 0, totalValue: 0 });
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
+  const [stockHistory, setStockHistory] = useState<StockHistoryItem[]>([]);
+  const [importRows, setImportRows] = useState<ImportProductRow[]>([]);
+  const [importErrors, setImportErrors] = useState<ImportErrorRow[]>([]);
+  const [importing, setImporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [formData, setFormData] = useState({
     name: "",
     sku: "",
+    barcode: "",
     category: "",
     stock: "",
     minStock: "",
@@ -157,6 +198,7 @@ const Inventory = () => {
     id: "",
     name: "",
     sku: "",
+    barcode: "",
     category: "",
     stock: "",
     minStock: "",
@@ -165,6 +207,50 @@ const Inventory = () => {
   const [loading, setLoading] = useState(false);
 
   const token = localStorage.getItem("token");
+
+  const normalizeImportHeader = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  const parseImportNumber = (value: unknown) => {
+    if (typeof value === "number") return value;
+    const text = String(value ?? "")
+      .trim()
+      .replace(/rp/gi, "")
+      .replace(/\s/g, "");
+
+    if (text.includes(",") && text.includes(".")) {
+      return Number(text.replace(/\./g, "").replace(",", "."));
+    }
+
+    if (text.includes(",")) {
+      return Number(text.replace(/,/g, ""));
+    }
+
+    return Number(text);
+  };
+
+  const getImportCell = (
+    row: unknown[],
+    headerMap: Record<string, number>,
+    aliases: string[]
+  ) => {
+    for (const alias of aliases) {
+      const index = headerMap[normalizeImportHeader(alias)];
+      if (index !== undefined) return row[index] ?? "";
+    }
+    return "";
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const status = params.get("status");
+    if (status === "critical" || status === "low") {
+      setSearchQuery("");
+    }
+  }, [location.search]);
 
   /* =========================
      FETCH PRODUCTS
@@ -179,12 +265,14 @@ const Inventory = () => {
       params.append("page", String(currentPage));
       params.append("limit", "10");
 
-      const res = await fetch(`${API_URL}/api/products?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/products?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
       if (json.success) {
-        setInventoryData(json.data);
+        const status = new URLSearchParams(location.search).get("status");
+        const products = status ? json.data.filter((item: ProductItem) => item.status === status) : json.data;
+        setInventoryData(products);
         setStats(json.stats);
         if (json.pagination) {
           setTotalPages(json.pagination.totalPages);
@@ -204,7 +292,7 @@ const Inventory = () => {
   const fetchCategories = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/categories`, {
+      const res = await fetch(`${API_BASE_URL}/api/categories`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -226,7 +314,7 @@ const Inventory = () => {
   const fetchLowStock = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/products/low-stock`, {
+      const res = await fetch(`${API_BASE_URL}/api/products/low-stock`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -286,7 +374,7 @@ const Inventory = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/products`, {
+      const res = await fetch(`${API_BASE_URL}/api/products`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -295,6 +383,7 @@ const Inventory = () => {
         body: JSON.stringify({
           name: formData.name,
           sku: formData.sku,
+          barcode: formData.barcode || undefined,
           category: formData.category,
           stock: Number(formData.stock),
           minStock: Number(formData.minStock),
@@ -307,6 +396,7 @@ const Inventory = () => {
         setFormData({
           name: "",
           sku: "",
+          barcode: "",
           category: "",
           stock: "",
           minStock: "",
@@ -342,7 +432,7 @@ const Inventory = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/products/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/products/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -363,9 +453,183 @@ const Inventory = () => {
   /* =========================
      HANDLE DETAIL
   ========================= */
-  const openDetail = (item: ProductItem) => {
+  const openDetail = async (item: ProductItem) => {
     setSelectedProduct(item);
+    setStockHistory([]);
     setIsDetailOpen(true);
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/stock-movements?productId=${item._id}&limit=5`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) setStockHistory(json.data);
+    } catch (error) {
+      console.error("Error fetching stock history:", error);
+    }
+  };
+
+  const handleExportInventory = async () => {
+    const rows = inventoryData.map((item, index) => ({
+      No: index + 1,
+      "Nama Barang": item.name,
+      SKU: item.sku,
+      Barcode: item.barcode || "",
+      Kategori: item.category,
+      Stok: item.stock,
+      "Min Stok": item.minStock,
+      Harga: item.price,
+      "Nilai Stok": item.price * item.stock,
+      Status:
+        item.status === "critical"
+          ? "Kritis"
+          : item.status === "low"
+          ? "Rendah"
+          : "Normal",
+    }));
+
+    await exportToStyledXlsx(
+      "inventory-ely-berkah-mart.xlsx",
+      "Laporan Inventory",
+      rows
+    );
+  };
+
+  const handleExportInventoryCsv = () => {
+    exportToCsv(
+      "inventory-ely-berkah-mart.csv",
+      inventoryData.map((item, index) => ({
+        No: index + 1,
+        "Nama Barang": item.name,
+        SKU: item.sku,
+        Barcode: item.barcode || "",
+        Kategori: item.category,
+        Stok: item.stock,
+        "Min Stok": item.minStock,
+        Harga: item.price,
+        "Nilai Stok": item.price * item.stock,
+        Status:
+          item.status === "critical"
+            ? "Kritis"
+            : item.status === "low"
+            ? "Rendah"
+            : "Normal",
+      }))
+    );
+  };
+
+  const handleDownloadTemplate = async () => {
+    await exportToStyledXlsx("template-import-inventory.xlsx", "Template Import Inventory", [
+      {
+        "Nama Barang": "Contoh Produk",
+        SKU: "PRD-001",
+        Barcode: "899000000001",
+        Kategori: categories[0] || "Makanan",
+        Stok: 20,
+        "Min Stok": 5,
+        Harga: 15000,
+      },
+    ]);
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        header: 1,
+        defval: "",
+        raw: false,
+      });
+      const headerRowIndex = rows.findIndex((row) => {
+        const normalized = row.map(normalizeImportHeader);
+        return normalized.includes("nama barang") && normalized.includes("sku");
+      });
+
+      if (headerRowIndex === -1) {
+        toast.error("Header tidak ditemukan. Pastikan ada kolom Nama Barang dan SKU.");
+        return;
+      }
+
+      const headerMap = rows[headerRowIndex].reduce<Record<string, number>>((acc, value, index) => {
+        const header = normalizeImportHeader(value);
+        if (header) acc[header] = index;
+        return acc;
+      }, {});
+
+      const parsedRows = rows
+        .slice(headerRowIndex + 1)
+        .map((row) => ({
+          name: String(getImportCell(row, headerMap, ["Nama Barang", "Name", "Nama"])).trim(),
+          sku: String(getImportCell(row, headerMap, ["SKU"])).trim(),
+          barcode: String(getImportCell(row, headerMap, ["Barcode"])).trim() || undefined,
+          category: String(getImportCell(row, headerMap, ["Kategori", "Category"])).trim(),
+          stock: parseImportNumber(getImportCell(row, headerMap, ["Stok", "Stock"])),
+          minStock: parseImportNumber(getImportCell(row, headerMap, ["Min Stok", "MinStock", "Minimum Stock"])),
+          price: parseImportNumber(getImportCell(row, headerMap, ["Harga", "Price"])),
+        }))
+        .filter((row) => row.name || row.sku || row.category);
+
+      setImportRows(parsedRows);
+      setImportErrors([]);
+
+      if (parsedRows.length === 0) {
+        toast.warning("File tidak memiliki data produk.");
+      } else {
+        toast.success(`${parsedRows.length} baris siap dipreview.`);
+      }
+    } catch (error) {
+      console.error("Error parsing import file:", error);
+      toast.error("Gagal membaca file. Pastikan format CSV/XLSX benar.");
+    }
+  };
+
+  const handleImportSubmit = async () => {
+    if (!token) {
+      toast.error("Token tidak ditemukan. Silakan login kembali.");
+      return;
+    }
+    if (importRows.length === 0) {
+      toast.warning("Pilih file import terlebih dahulu.");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/products/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ items: importRows }),
+      });
+      const json = await res.json();
+      const errors = json.data?.errors || [];
+      setImportErrors(errors);
+
+      if (json.success) {
+        toast.success(`${json.data.created} produk berhasil diimport.`);
+        if (errors.length === 0) {
+          setIsImportOpen(false);
+          setImportRows([]);
+        }
+        fetchProducts();
+        fetchLowStock();
+      } else {
+        toast.error(json.message || "Import gagal.");
+      }
+    } catch (error) {
+      console.error("Error importing products:", error);
+      toast.error("Terjadi kesalahan saat import.");
+    } finally {
+      setImporting(false);
+    }
   };
 
   /* =========================
@@ -376,6 +640,7 @@ const Inventory = () => {
       id: item._id,
       name: item.name,
       sku: item.sku,
+      barcode: item.barcode || "",
       category: item.category,
       stock: String(item.stock),
       minStock: String(item.minStock),
@@ -400,7 +665,7 @@ const Inventory = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/products/${editFormData.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/products/${editFormData.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -409,6 +674,7 @@ const Inventory = () => {
         body: JSON.stringify({
           name: editFormData.name,
           sku: editFormData.sku,
+          barcode: editFormData.barcode || undefined,
           category: editFormData.category,
           stock: Number(editFormData.stock),
           minStock: Number(editFormData.minStock),
@@ -632,6 +898,19 @@ const Inventory = () => {
                     </div>
 
                     <div>
+                      <Label>Barcode (opsional)</Label>
+
+                      <Input
+                        name="barcode"
+                        placeholder="Nomor barcode di kemasan"
+                        value={formData.barcode}
+                        onChange={
+                          handleInputChange
+                        }
+                      />
+                    </div>
+
+                    <div>
                       <Label>
                         Kategori
                       </Label>
@@ -735,6 +1014,121 @@ const Inventory = () => {
                   </div>
                 </DialogContent>
               </Dialog>
+              <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Upload className="w-4 h-4" />
+                    Import
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Import Data Inventory</DialogTitle>
+                    <DialogDescription>
+                      Upload file CSV/XLSX dengan kolom sesuai template.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Button variant="outline" onClick={handleDownloadTemplate}>
+                        Download Template
+                      </Button>
+                      <Input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={handleImportFile}
+                      />
+                    </div>
+
+                    <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+                      Kolom wajib: Nama Barang, SKU, Kategori, Stok, Min Stok, Harga.
+                      Barcode opsional. Kategori harus sudah aktif di sistem.
+                    </div>
+
+                    {importRows.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="font-medium">Preview ({importRows.length} baris)</p>
+                          <Badge variant="secondary">Create produk baru</Badge>
+                        </div>
+
+                        <div className="rounded-lg border overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead>Nama</TableHead>
+                                <TableHead>SKU</TableHead>
+                                <TableHead>Kategori</TableHead>
+                                <TableHead className="text-right">Stok</TableHead>
+                                <TableHead className="text-right">Harga</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {importRows.slice(0, 6).map((row, index) => (
+                                <TableRow key={`${row.sku}-${index}`}>
+                                  <TableCell>{row.name}</TableCell>
+                                  <TableCell>{row.sku}</TableCell>
+                                  <TableCell>{row.category}</TableCell>
+                                  <TableCell className="text-right">{row.stock}</TableCell>
+                                  <TableCell className="text-right">{formatCurrency(row.price || 0)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+
+                        {importRows.length > 6 && (
+                          <p className="text-xs text-muted-foreground">
+                            Menampilkan 6 baris pertama dari {importRows.length} baris.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {importErrors.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="font-medium text-red-500">Data yang gagal diimport</p>
+                        <div className="max-h-48 overflow-y-auto rounded-lg border">
+                          {importErrors.map((error) => (
+                            <div key={`${error.row}-${error.sku}`} className="border-b p-3 text-sm last:border-0">
+                              <p className="font-medium">
+                                Baris {error.row}: {error.sku || error.name || "-"}
+                              </p>
+                              <p className="text-red-500">{error.errors.join(", ")}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setIsImportOpen(false)}>
+                        Tutup
+                      </Button>
+                      <Button onClick={handleImportSubmit} disabled={importing || importRows.length === 0}>
+                        {importing ? "Mengimport..." : "Konfirmasi Import"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Download className="w-4 h-4" />
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportInventoryCsv}>
+                    Export CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportInventory}>
+                    Export XLSX
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </CardHeader>
 
@@ -1041,6 +1435,31 @@ const Inventory = () => {
                   </p>
                 </div>
               </div>
+
+              <div className="pt-2 border-t">
+                <p className="text-sm font-medium mb-3">Riwayat Stok Terakhir</p>
+                <div className="space-y-2">
+                  {stockHistory.length > 0 ? (
+                    stockHistory.map((history) => (
+                      <div key={history._id} className="flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {history.type === "IN" ? "Stock Masuk" : "Stock Keluar"} ({history.qty})
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {history.stockBefore} {"->"} {history.stockAfter} | {history.note || history.reference || "-"}
+                          </p>
+                        </div>
+                        <Badge className={history.type === "IN" ? "bg-emerald-500/10 text-emerald-500 border-0" : "bg-red-500/10 text-red-500 border-0"}>
+                          {history.type}
+                        </Badge>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Belum ada riwayat stok.</p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1083,6 +1502,16 @@ const Inventory = () => {
               <Input
                 name="sku"
                 value={editFormData.sku}
+                onChange={handleEditInputChange}
+              />
+            </div>
+
+            <div>
+              <Label>Barcode (opsional)</Label>
+              <Input
+                name="barcode"
+                placeholder="Nomor barcode di kemasan"
+                value={editFormData.barcode}
                 onChange={handleEditInputChange}
               />
             </div>

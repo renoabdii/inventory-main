@@ -1,11 +1,21 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
 
+// Helper: Get userId untuk filter (admin = own, kasir = admin's)
+const getOwnerUserId = (req) => {
+  if (req.user.role === 'admin') {
+    return req.user.id;
+  } else if (req.user.role === 'kasir') {
+    return req.user.adminId;
+  }
+};
+
 // Get semua produk (dengan filter & search & pagination)
 const getAll = async (req, res, next) => {
   try {
     const { search, category, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const userId = getOwnerUserId(req);
+    const filter = { userId };
 
     if (search) {
       filter.$or = [
@@ -56,7 +66,8 @@ const getAll = async (req, res, next) => {
 // Get produk by ID
 const getById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const userId = getOwnerUserId(req);
+    const product = await Product.findOne({ _id: req.params.id, userId });
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
@@ -71,15 +82,27 @@ const getById = async (req, res, next) => {
 // Tambah produk baru
 const create = async (req, res, next) => {
   try {
-    const { name, sku, category, stock, minStock, price } = req.body;
+    // Hanya admin yang bisa create produk
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa membuat produk' });
+    }
 
-    // Validasi kategori harus ada dan aktif
-    const categoryExists = await Category.findOne({ name: category, status: 'active' });
+    const { name, sku, category, stock, minStock, price, barcode } = req.body;
+
+    if (barcode) {
+      const barcodeExists = await Product.findOne({ barcode });
+      if (barcodeExists) {
+        return res.status(400).json({ success: false, message: 'Barcode sudah dipakai' });
+      }
+    }
+
+    // Validasi kategori harus ada dan aktif (dan milik user yang sama)
+    const categoryExists = await Category.findOne({ name: category, status: 'active', userId: req.user.id });
     if (!categoryExists) {
       return res.status(400).json({ success: false, message: 'Kategori tidak ditemukan atau tidak aktif' });
     }
 
-    const product = await Product.create({ name, sku, category, stock, minStock, price });
+    const product = await Product.create({ name, sku, category, stock, minStock, price, barcode, userId: req.user.id });
     res.status(201).json({ success: true, data: product });
   } catch (error) {
     if (error.code === 11000) {
@@ -92,22 +115,116 @@ const create = async (req, res, next) => {
   }
 };
 
+// Import produk dari hasil parsing Excel/CSV
+const importBulk = async (req, res, next) => {
+  try {
+    // Hanya admin yang bisa import
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa import produk' });
+    }
+
+    const { items } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Data import kosong' });
+    }
+
+    const activeCategories = await Category.find({ status: 'active', userId: req.user.id });
+    const categoryNames = new Set(activeCategories.map((cat) => cat.name));
+    const existingSkus = new Set((await Product.find({ userId: req.user.id }, 'sku')).map((p) => p.sku));
+    const existingBarcodes = new Set(
+      (await Product.find({ userId: req.user.id, barcode: { $exists: true, $ne: '' } }, 'barcode')).map((p) => p.barcode)
+    );
+
+    const seenSkus = new Set();
+    const seenBarcodes = new Set();
+    const errors = [];
+    const validItems = [];
+
+    items.forEach((raw, index) => {
+      const row = index + 2;
+      const name = String(raw.name || '').trim();
+      const sku = String(raw.sku || '').trim().toUpperCase();
+      const barcode = raw.barcode ? String(raw.barcode).trim() : undefined;
+      const category = String(raw.category || '').trim();
+      const stock = Number(raw.stock);
+      const minStock = Number(raw.minStock);
+      const price = Number(raw.price);
+      const rowErrors = [];
+
+      if (!name) rowErrors.push('Nama barang wajib diisi');
+      if (!sku) rowErrors.push('SKU wajib diisi');
+      if (!category) rowErrors.push('Kategori wajib diisi');
+      if (!categoryNames.has(category)) rowErrors.push(`Kategori "${category}" tidak aktif/tidak ditemukan`);
+      if (!Number.isFinite(stock) || stock < 0) rowErrors.push('Stok harus angka minimal 0');
+      if (!Number.isFinite(minStock) || minStock < 0) rowErrors.push('Min stok harus angka minimal 0');
+      if (!Number.isFinite(price) || price < 0) rowErrors.push('Harga harus angka minimal 0');
+      if (sku && existingSkus.has(sku)) rowErrors.push(`SKU "${sku}" sudah ada`);
+      if (sku && seenSkus.has(sku)) rowErrors.push(`SKU "${sku}" duplikat di file`);
+      if (barcode && existingBarcodes.has(barcode)) rowErrors.push(`Barcode "${barcode}" sudah ada`);
+      if (barcode && seenBarcodes.has(barcode)) rowErrors.push(`Barcode "${barcode}" duplikat di file`);
+
+      if (rowErrors.length > 0) {
+        errors.push({ row, sku, name, errors: rowErrors });
+        return;
+      }
+
+      seenSkus.add(sku);
+      if (barcode) seenBarcodes.add(barcode);
+      validItems.push({ name, sku, barcode, category, stock, minStock, price, userId: req.user.id });
+    });
+
+    if (validItems.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tidak ada data valid untuk diimport',
+        data: { created: 0, errors },
+      });
+    }
+
+    const created = await Product.insertMany(validItems, { ordered: true });
+
+    res.status(201).json({
+      success: true,
+      message: `${created.length} produk berhasil diimport`,
+      data: {
+        created: created.length,
+        errors,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Update produk
 const update = async (req, res, next) => {
   try {
-    const { name, sku, category, stock, minStock, price } = req.body;
+    // Hanya admin yang bisa update produk
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa mengubah produk' });
+    }
 
-    // Validasi kategori harus ada dan aktif
+    const { name, sku, category, stock, minStock, price, barcode } = req.body;
+
+    // Validasi kategori harus ada dan aktif (dan milik user yang sama)
     if (category) {
-      const categoryExists = await Category.findOne({ name: category, status: 'active' });
+      const categoryExists = await Category.findOne({ name: category, status: 'active', userId: req.user.id });
       if (!categoryExists) {
         return res.status(400).json({ success: false, message: 'Kategori tidak ditemukan atau tidak aktif' });
       }
     }
 
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      { name, sku, category, stock, minStock, price },
+    if (barcode) {
+      const barcodeExists = await Product.findOne({ barcode, _id: { $ne: req.params.id }, userId: req.user.id });
+      if (barcodeExists) {
+        return res.status(400).json({ success: false, message: 'Barcode sudah dipakai' });
+      }
+    }
+
+    const product = await Product.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { name, sku, category, stock, minStock, price, barcode },
       { new: true, runValidators: true }
     );
 
@@ -127,7 +244,12 @@ const update = async (req, res, next) => {
 // Hapus produk
 const remove = async (req, res, next) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id);
+    // Hanya admin yang bisa hapus produk
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa menghapus produk' });
+    }
+
+    const product = await Product.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
@@ -142,7 +264,8 @@ const remove = async (req, res, next) => {
 // Get semua kategori (untuk dropdown filter)
 const getCategories = async (req, res, next) => {
   try {
-    const categories = await Product.distinct('category');
+    const userId = getOwnerUserId(req);
+    const categories = await Product.distinct('category', { userId });
     res.json({ success: true, data: categories });
   } catch (error) {
     next(error);
@@ -152,7 +275,8 @@ const getCategories = async (req, res, next) => {
 // Get produk dengan stock rendah/kritis (untuk alert)
 const getLowStock = async (req, res, next) => {
   try {
-    const products = await Product.find();
+    const userId = getOwnerUserId(req);
+    const products = await Product.find({ userId });
     const lowStockProducts = products.filter(
       (p) => p.status === 'low' || p.status === 'critical'
     );
@@ -162,4 +286,4 @@ const getLowStock = async (req, res, next) => {
   }
 };
 
-module.exports = { getAll, getById, create, update, remove, getCategories, getLowStock };
+module.exports = { getAll, getById, create, importBulk, update, remove, getCategories, getLowStock };

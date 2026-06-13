@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -91,7 +91,7 @@ const Forecast = () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/forecast`, {
+      const res = await fetch(`${API_BASE_URL}/api/forecast`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

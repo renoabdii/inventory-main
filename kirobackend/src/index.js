@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const connectDB = require('./config/database');
 const routes = require('./routes');
@@ -16,12 +17,28 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Prevent browser/proxy caching for API responses.
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Routes
 app.use('/api', routes);
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({ message: 'Server is running', timestamp: new Date().toISOString() });
+// Serve frontend static files (production)
+const frontendPath = path.join(__dirname, '..', '..', 'dist');
+app.use(express.static(frontendPath));
+
+// SPA fallback: semua route yang bukan /api diarahkan ke index.html
+app.get('*', (req, res) => {
+  const indexPath = path.join(frontendPath, 'index.html');
+  const fs = require('fs');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.json({ message: 'Server is running. Build frontend with "npm run build" to serve UI.', timestamp: new Date().toISOString() });
+  }
 });
 
 // Error handling middleware

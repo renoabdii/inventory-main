@@ -10,7 +10,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 interface Notification {
   id: string;
@@ -35,7 +35,7 @@ const CashierLayout = ({ children, title = "Dashboard Kasir" }: CashierLayoutPro
     if (!token) return;
     try {
       // Kasir hanya perlu tahu produk yang stoknya rendah/kritis
-      const res = await fetch(`${API_URL}/api/products/low-stock`, {
+      const res = await fetch(`${API_BASE_URL}/api/products/low-stock`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

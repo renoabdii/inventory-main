@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Sidebar,
   SidebarContent,
@@ -16,6 +17,7 @@ import {
 import { NavLink } from "@/components/NavLink";
 import {
   LayoutDashboard,
+  Clock,
   ShoppingBag,
   ShoppingCart,
   Package,
@@ -42,6 +44,7 @@ const menuGroups = [
       { title: "Dashboard", url: "/kasir", icon: LayoutDashboard },
       { title: "POS", url: "/kasir/pos", icon: ShoppingBag },
       { title: "Riwayat Transaksi", url: "/kasir/transactions", icon: ShoppingCart },
+      { title: "Shift Kasir", url: "/kasir/shift", icon: Clock },
       { title: "Cek Stok", url: "/kasir/stock", icon: Package },
     ],
   },
@@ -58,6 +61,7 @@ const CashierSidebar = () => {
   const collapsed = state === "collapsed";
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   const isActive = (path: string) => {
@@ -66,6 +70,7 @@ const CashierSidebar = () => {
   };
 
   const handleLogout = () => {
+    queryClient.clear();
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     navigate("/");

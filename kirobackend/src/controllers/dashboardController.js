@@ -7,7 +7,7 @@ const IncomingItem = require('../models/IncomingItem');
 const getSummary = async (req, res, next) => {
   try {
     // === PRODUCT STATS ===
-    const products = await Product.find();
+    const products = await Product.find({ userId: req.user.id });
     const totalProducts = products.length;
     const criticalStock = products.filter((p) => p.status === 'critical');
     const lowStock = products.filter((p) => p.status === 'low');
@@ -23,10 +23,12 @@ const getSummary = async (req, res, next) => {
     todayStart.setHours(0, 0, 0, 0);
 
     const weekMovements = await StockMovement.find({
+      userId: req.user.id,
       createdAt: { $gte: weekAgo, $lte: today },
     }).sort({ createdAt: -1 });
 
     const todayMovements = await StockMovement.find({
+      userId: req.user.id,
       createdAt: { $gte: todayStart, $lte: today },
     });
 
@@ -39,11 +41,11 @@ const getSummary = async (req, res, next) => {
     const todayStockInQty = todayStockIn.reduce((acc, m) => acc + m.qty, 0);
 
     // === PURCHASE ORDER STATS ===
-    const allPO = await PurchaseOrder.find();
+    const allPO = await PurchaseOrder.find({ userId: req.user.id });
     const pendingPO = allPO.filter((po) => po.status === 'PENDING').length;
 
     // === RECENT ACTIVITIES (5 terbaru) ===
-    const recentMovements = await StockMovement.find()
+    const recentMovements = await StockMovement.find({ userId: req.user.id })
       .sort({ createdAt: -1 })
       .limit(5);
 

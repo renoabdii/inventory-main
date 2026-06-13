@@ -47,7 +47,7 @@ const purchaseOrderFSM = {
 /**
  * FSM untuk Incoming Items (Penerimaan Barang)
  * 
- * States: PENDING, IN_PROGRESS, COMPLETED
+ * States: pending, in_progress, completed, cancelled, rejected
  * 
  * Diagram:
  *   PENDING ──[process]──► IN_PROGRESS ──[complete]──► COMPLETED
@@ -61,14 +61,22 @@ const incomingItemFSM = {
       transitions: {
         process: 'in_progress',
         complete: 'completed',
+        cancel: 'cancelled',
       },
     },
     in_progress: {
       transitions: {
         complete: 'completed',
+        reject: 'rejected',
       },
     },
     completed: {
+      transitions: {}, // Final state
+    },
+    cancelled: {
+      transitions: {}, // Final state
+    },
+    rejected: {
       transitions: {}, // Final state
     },
   },

@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 interface Notification {
   id: string;
@@ -46,7 +46,7 @@ const DashboardLayout = ({ children, title = "Dashboard" }: DashboardLayoutProps
   const fetchNotifications = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/dashboard/notifications`, {
+      const res = await fetch(`${API_BASE_URL}/api/dashboard/notifications`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

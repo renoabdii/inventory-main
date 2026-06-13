@@ -14,12 +14,12 @@ const getStockState = (stock, minStock) => {
 const getAll = async (req, res, next) => {
   try {
     const { search, status, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const filter = { userId: req.user.id };
 
     if (search) {
       filter.$or = [{ poNumber: { $regex: search, $options: 'i' } }];
 
-      const suppliers = await Supplier.find({ name: { $regex: search, $options: 'i' } });
+      const suppliers = await Supplier.find({ name: { $regex: search, $options: 'i' }, userId: req.user.id });
       if (suppliers.length > 0) {
         const supplierIds = suppliers.map((s) => s._id);
         filter.$or.push({ supplier: { $in: supplierIds } });
@@ -43,7 +43,7 @@ const getAll = async (req, res, next) => {
       .limit(limitNum);
 
     // Stats
-    const allOrders = await PurchaseOrder.find();
+    const allOrders = await PurchaseOrder.find({ userId: req.user.id });
     const stats = {
       total: allOrders.length,
       pending: allOrders.filter((o) => o.status === 'PENDING').length,
@@ -70,7 +70,7 @@ const getAll = async (req, res, next) => {
 // Get by ID
 const getById = async (req, res, next) => {
   try {
-    const order = await PurchaseOrder.findById(req.params.id)
+    const order = await PurchaseOrder.findOne({ _id: req.params.id, userId: req.user.id })
       .populate('supplier', 'name supplierId phone address')
       .populate('items.product', 'name sku stock price')
       .populate('createdBy', 'username');
@@ -91,7 +91,7 @@ const create = async (req, res, next) => {
     const { poNumber, supplierId, items, note } = req.body;
 
     // Validasi supplier
-    const supplier = await Supplier.findById(supplierId);
+    const supplier = await Supplier.findOne({ _id: supplierId, userId: req.user.id });
     if (!supplier) {
       return res.status(400).json({ success: false, message: 'Supplier tidak ditemukan' });
     }
@@ -108,7 +108,7 @@ const create = async (req, res, next) => {
     let totalAmount = 0;
 
     for (const item of items) {
-      const product = await Product.findById(item.product);
+      const product = await Product.findOne({ _id: item.product, userId: req.user.id });
       if (!product) {
         return res.status(400).json({
           success: false,
@@ -126,6 +126,7 @@ const create = async (req, res, next) => {
     }
 
     const order = await PurchaseOrder.create({
+      userId: req.user.id,
       poNumber,
       supplier: supplierId,
       items: itemsWithDetails,
@@ -134,7 +135,7 @@ const create = async (req, res, next) => {
       createdBy: req.user._id,
     });
 
-    const populatedOrder = await PurchaseOrder.findById(order._id)
+    const populatedOrder = await PurchaseOrder.findOne({ _id: order._id, userId: req.user.id })
       .populate('supplier', 'name supplierId');
 
     res.status(201).json({ success: true, data: populatedOrder });
@@ -153,7 +154,7 @@ const create = async (req, res, next) => {
 // Event: approve, ship, complete, cancel
 const updateStatus = async (req, res, next) => {
   try {
-    const { event } = req.body;
+    const { event, note } = req.body;
     const order = await PurchaseOrder.findById(req.params.id).populate('supplier', 'name');
 
     if (!order) {
@@ -183,8 +184,17 @@ const updateStatus = async (req, res, next) => {
         receiptId,
         date: new Date(),
         supplier: order.supplier.name,
+        source: 'purchase_order',
+        reference: order.poNumber,
         items: incomingItems,
         status: 'completed',
+        statusHistory: [{
+          from: null,
+          to: 'completed',
+          event: 'complete',
+          note: `Otomatis dari PO ${order.poNumber}`,
+          changedBy: req.user._id,
+        }],
         createdBy: req.user._id,
       });
 
@@ -220,6 +230,13 @@ const updateStatus = async (req, res, next) => {
       }
     }
 
+    order.statusHistory.push({
+      from: order.status,
+      to: newStatus,
+      event,
+      note,
+      changedBy: req.user._id,
+    });
     order.status = newStatus;
     await order.save();
 

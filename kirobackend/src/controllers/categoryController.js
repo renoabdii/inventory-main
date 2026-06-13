@@ -1,11 +1,21 @@
 const Category = require('../models/Category');
 const Product = require('../models/Product');
 
+// Helper: Get userId untuk filter (admin = own, kasir = admin's)
+const getOwnerUserId = (req) => {
+  if (req.user.role === 'admin') {
+    return req.user.id;
+  } else if (req.user.role === 'kasir') {
+    return req.user.adminId;
+  }
+};
+
 // Get semua kategori (dengan search & pagination)
 const getAll = async (req, res, next) => {
   try {
     const { search, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const userId = getOwnerUserId(req);
+    const filter = { userId };
 
     if (search) {
       filter.name = { $regex: search, $options: 'i' };
@@ -24,16 +34,16 @@ const getAll = async (req, res, next) => {
     // Hitung totalProducts per kategori
     const categoriesWithCount = await Promise.all(
       categories.map(async (cat) => {
-        const totalProducts = await Product.countDocuments({ category: cat.name });
+        const totalProducts = await Product.countDocuments({ category: cat.name, userId: req.user.id });
         return { ...cat.toObject(), totalProducts };
       })
     );
 
     // Hitung statistik (dari semua data)
-    const allCategories = await Category.find();
+    const allCategories = await Category.find({ userId: req.user.id });
     const allCategoriesWithCount = await Promise.all(
       allCategories.map(async (cat) => {
-        const totalProducts = await Product.countDocuments({ category: cat.name });
+        const totalProducts = await Product.countDocuments({ category: cat.name, userId: req.user.id });
         return { ...cat.toObject(), totalProducts };
       })
     );
@@ -63,13 +73,14 @@ const getAll = async (req, res, next) => {
 // Get kategori by ID
 const getById = async (req, res, next) => {
   try {
-    const category = await Category.findById(req.params.id);
+    const userId = getOwnerUserId(req);
+    const category = await Category.findOne({ _id: req.params.id, userId });
 
     if (!category) {
       return res.status(404).json({ success: false, message: 'Kategori tidak ditemukan' });
     }
 
-    const totalProducts = await Product.countDocuments({ category: category.name });
+    const totalProducts = await Product.countDocuments({ category: category.name, userId });
 
     res.json({ success: true, data: { ...category.toObject(), totalProducts } });
   } catch (error) {
@@ -80,8 +91,13 @@ const getById = async (req, res, next) => {
 // Tambah kategori baru
 const create = async (req, res, next) => {
   try {
+    // Hanya admin yang bisa create kategori
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa membuat kategori' });
+    }
+
     const { name, description } = req.body;
-    const category = await Category.create({ name, description });
+    const category = await Category.create({ name, description, userId: req.user.id });
     res.status(201).json({ success: true, data: category });
   } catch (error) {
     if (error.code === 11000) {
@@ -97,9 +113,14 @@ const create = async (req, res, next) => {
 // Update kategori
 const update = async (req, res, next) => {
   try {
+    // Hanya admin yang bisa update kategori
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa mengubah kategori' });
+    }
+
     const { name, description, status } = req.body;
 
-    const category = await Category.findById(req.params.id);
+    const category = await Category.findOne({ _id: req.params.id, userId: req.user.id });
     if (!category) {
       return res.status(404).json({ success: false, message: 'Kategori tidak ditemukan' });
     }
@@ -113,7 +134,7 @@ const update = async (req, res, next) => {
 
     // Jika nama berubah, update semua produk yang pakai nama lama
     if (name && name !== oldName) {
-      await Product.updateMany({ category: oldName }, { category: name });
+      await Product.updateMany({ category: oldName, userId: req.user.id }, { category: name });
     }
 
     res.json({ success: true, data: category });
@@ -128,14 +149,19 @@ const update = async (req, res, next) => {
 // Hapus kategori
 const remove = async (req, res, next) => {
   try {
-    const category = await Category.findById(req.params.id);
+    // Hanya admin yang bisa hapus kategori
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Hanya admin yang bisa menghapus kategori' });
+    }
+
+    const category = await Category.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!category) {
       return res.status(404).json({ success: false, message: 'Kategori tidak ditemukan' });
     }
 
     // Cek apakah masih ada produk yang menggunakan kategori ini
-    const productCount = await Product.countDocuments({ category: category.name });
+    const productCount = await Product.countDocuments({ category: category.name, userId: req.user.id });
     if (productCount > 0) {
       return res.status(400).json({
         success: false,
@@ -143,7 +169,7 @@ const remove = async (req, res, next) => {
       });
     }
 
-    await Category.findByIdAndDelete(req.params.id);
+    await Category.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
     res.json({ success: true, message: 'Kategori berhasil dihapus' });
   } catch (error) {
     next(error);

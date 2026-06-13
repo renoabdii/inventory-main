@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -18,6 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 import {
   Table,
@@ -170,10 +172,14 @@ const formatCurrency = (value: number) => {
 ========================= */
 
 const PurchaseOrders = () => {
+  const location = useLocation();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrderData[]>([]);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusDialog, setStatusDialog] = useState<{ id: string; event: string; label: string } | null>(null);
+  const [statusNote, setStatusNote] = useState("");
   const [stats, setStats] = useState<POStats>({ total: 0, pending: 0, shipping: 0, completed: 0 });
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
@@ -190,6 +196,11 @@ const PurchaseOrders = () => {
 
   const token = localStorage.getItem("token");
 
+  useEffect(() => {
+    const status = new URLSearchParams(location.search).get("status");
+    if (status) setStatusFilter(status);
+  }, [location.search]);
+
   /* FETCH ORDERS */
   const fetchOrders = async () => {
     if (!token) return;
@@ -197,10 +208,11 @@ const PurchaseOrders = () => {
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
+      if (statusFilter !== "all") params.append("status", statusFilter);
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
-      const res = await fetch(`${API_URL}/api/purchase-orders?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/purchase-orders?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -223,7 +235,7 @@ const PurchaseOrders = () => {
   const fetchSuppliers = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/suppliers`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -239,7 +251,7 @@ const PurchaseOrders = () => {
   const fetchProducts = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/products`, {
+      const res = await fetch(`${API_BASE_URL}/api/products`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -256,7 +268,7 @@ const PurchaseOrders = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [searchQuery, currentPage, token]);
+  }, [searchQuery, statusFilter, currentPage, token]);
 
   /* FORM HANDLERS */
   const handleItemChange = (index: number, field: string, value: string) => {
@@ -295,7 +307,7 @@ const PurchaseOrders = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/purchase-orders`, {
+      const res = await fetch(`${API_BASE_URL}/api/purchase-orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -322,7 +334,7 @@ const PurchaseOrders = () => {
   };
 
   /* UPDATE STATUS via FSM event */
-  const handleUpdateStatus = async (id: string, event: string) => {
+  const handleUpdateStatus = async (id: string, event: string, note = "") => {
     const messages: Record<string, string> = {
       approve: "Approve PO ini?",
       ship: "Ubah status ke Shipping?",
@@ -340,10 +352,10 @@ const PurchaseOrders = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/purchase-orders/${id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/api/purchase-orders/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ event }),
+        body: JSON.stringify({ event, note }),
       });
       const json = await res.json();
       if (json.success) {
@@ -358,6 +370,18 @@ const PurchaseOrders = () => {
     }
   };
 
+  const openStatusDialog = (id: string, event: string, label: string) => {
+    setStatusDialog({ id, event, label });
+    setStatusNote("");
+  };
+
+  const submitStatusDialog = () => {
+    if (!statusDialog) return;
+    handleUpdateStatus(statusDialog.id, statusDialog.event, statusNote);
+    setStatusDialog(null);
+    setStatusNote("");
+  };
+
   /* DELETE */
   const handleDelete = async (id: string) => {
     const confirmed = await confirm({
@@ -370,7 +394,7 @@ const PurchaseOrders = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/purchase-orders/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/purchase-orders/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -571,9 +595,24 @@ const PurchaseOrders = () => {
           </CardHeader>
 
           <CardContent>
-            <div className="relative mb-6">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Cari nomor PO atau supplier..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            <div className="flex flex-col md:flex-row gap-3 mb-6">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input placeholder="Cari nomor PO atau supplier..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              </div>
+              <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setCurrentPage(1); }}>
+                <SelectTrigger className="w-full md:w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Status</SelectItem>
+                  <SelectItem value="PENDING">Pending</SelectItem>
+                  <SelectItem value="APPROVED">Approved</SelectItem>
+                  <SelectItem value="SHIPPING">Shipping</SelectItem>
+                  <SelectItem value="COMPLETED">Completed</SelectItem>
+                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="rounded-xl border overflow-hidden">
@@ -617,7 +656,7 @@ const PurchaseOrders = () => {
                                 <DropdownMenuItem
                                   key={action.event}
                                   className="gap-2"
-                                  onClick={() => handleUpdateStatus(item._id, action.event)}
+                                  onClick={() => openStatusDialog(item._id, action.event, action.label)}
                                 >
                                   <ArrowRight className="w-4 h-4" />
                                   {action.label}
@@ -657,6 +696,26 @@ const PurchaseOrders = () => {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={!!statusDialog} onOpenChange={(open) => !open && setStatusDialog(null)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{statusDialog?.label} Purchase Order</DialogTitle>
+            <DialogDescription>Tambahkan catatan agar riwayat approval lebih jelas.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Catatan</Label>
+            <Textarea
+              placeholder="Contoh: disetujui karena stok sudah menipis"
+              value={statusNote}
+              onChange={(e) => setStatusNote(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setStatusDialog(null)}>Batal</Button>
+            <Button onClick={submitStatusDialog}>Simpan Status</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialogComponent />
     </DashboardLayout>
   );

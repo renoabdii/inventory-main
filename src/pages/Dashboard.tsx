@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import CreateCashierDialog from "@/components/CreateCashierDialog";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 import {
   Card,
@@ -62,6 +64,7 @@ interface DashboardData {
 ========================= */
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -71,7 +74,7 @@ const Dashboard = () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/dashboard/summary`, {
+      const res = await fetch(`${API_BASE_URL}/api/dashboard/summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -116,15 +119,18 @@ const Dashboard = () => {
               Berikut ringkasan inventory hari ini.
             </p>
           </div>
-          <Badge className="w-fit bg-primary/10 text-primary border-0 px-4 py-2 text-sm">
-            {today}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <CreateCashierDialog />
+            <Badge className="w-fit bg-primary/10 text-primary border-0 px-4 py-2 text-sm">
+              {today}
+            </Badge>
+          </div>
         </div>
 
         {/* SUMMARY CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* TOTAL PRODUCT */}
-          <Card>
+          <Card className="cursor-pointer transition-colors hover:border-primary/50" onClick={() => navigate("/dashboard/inventory")}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -142,7 +148,7 @@ const Dashboard = () => {
           </Card>
 
           {/* STOCK CRITICAL */}
-          <Card>
+          <Card className="cursor-pointer transition-colors hover:border-red-500/50" onClick={() => navigate("/dashboard/inventory?status=critical")}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -161,7 +167,7 @@ const Dashboard = () => {
           </Card>
 
           {/* STOCK IN TODAY */}
-          <Card>
+          <Card className="cursor-pointer transition-colors hover:border-emerald-500/50" onClick={() => navigate("/dashboard/stockmovement?type=IN")}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -177,7 +183,7 @@ const Dashboard = () => {
           </Card>
 
           {/* PURCHASE ORDER */}
-          <Card>
+          <Card className="cursor-pointer transition-colors hover:border-primary/50" onClick={() => navigate("/dashboard/purchaseorder?status=PENDING")}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>

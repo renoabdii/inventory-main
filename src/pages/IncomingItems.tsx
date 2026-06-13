@@ -31,15 +31,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, Plus, PackagePlus, TrendingUp, Clock, Calendar, MoreVertical, CheckCircle, Trash2 } from "lucide-react";
+import { Search, Plus, PackagePlus, TrendingUp, Clock, Calendar, MoreVertical, CheckCircle, Trash2, Eye, XCircle } from "lucide-react";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
 
 /* =========================
    TYPES
@@ -52,13 +53,24 @@ interface IncomingItemDetail {
   status: string;
 }
 
+interface IncomingHistory {
+  from?: string;
+  to: string;
+  event: string;
+  note?: string;
+  changedAt: string;
+}
+
 interface IncomingItemData {
   _id: string;
   receiptId: string;
   date: string;
   supplier: string;
+  source?: "manual" | "purchase_order";
+  reference?: string;
   items: IncomingItemDetail[];
   status: string;
+  statusHistory?: IncomingHistory[];
   totalItems: number;
   totalQty: number;
   createdAt: string;
@@ -68,6 +80,13 @@ interface ProductOption {
   _id: string;
   name: string;
   sku: string;
+}
+
+interface SupplierOption {
+  _id: string;
+  name: string;
+  supplierId: string;
+  status: string;
 }
 
 interface IncomingStats {
@@ -83,11 +102,15 @@ interface IncomingStats {
 const getStatusBadge = (status: string) => {
   switch (status) {
     case "completed":
-      return <Badge className="bg-emerald-500/10 text-emerald-500 border-0">Selesai</Badge>;
+      return <Badge className="bg-emerald-500/10 text-emerald-500 border-0">Terverifikasi</Badge>;
     case "pending":
       return <Badge className="bg-yellow-500/10 text-yellow-500 border-0">Menunggu</Badge>;
     case "in_progress":
-      return <Badge className="bg-blue-500/10 text-blue-500 border-0">Proses</Badge>;
+      return <Badge className="bg-blue-500/10 text-blue-500 border-0">Pengecekan</Badge>;
+    case "cancelled":
+      return <Badge className="bg-slate-500/10 text-slate-500 border-0">Dibatalkan</Badge>;
+    case "rejected":
+      return <Badge className="bg-red-500/10 text-red-500 border-0">Ditolak</Badge>;
     default:
       return <Badge variant="secondary">Unknown</Badge>;
   }
@@ -102,8 +125,13 @@ const IncomingItems = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [incomingData, setIncomingData] = useState<IncomingItemData[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [selectedIncoming, setSelectedIncoming] = useState<IncomingItemData | null>(null);
+  const [statusDialog, setStatusDialog] = useState<{ id: string; event: string; title: string } | null>(null);
+  const [statusNote, setStatusNote] = useState("");
   const [stats, setStats] = useState<IncomingStats>({ todayQty: 0, weekQty: 0, pending: 0 });
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -135,7 +163,7 @@ const IncomingItems = () => {
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
-      const res = await fetch(`${API_URL}/api/incoming-items?${params}`, {
+      const res = await fetch(`${API_BASE_URL}/api/incoming-items?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -154,13 +182,28 @@ const IncomingItems = () => {
     }
   };
 
+  const fetchSuppliers = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuppliers(json.data.filter((supplier: SupplierOption) => supplier.status === "ACTIVE"));
+      }
+    } catch (error) {
+      console.error("Error fetching suppliers:", error);
+    }
+  };
+
   /* =========================
      FETCH PRODUCTS (for dropdown)
   ========================= */
   const fetchProducts = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/products`, {
+      const res = await fetch(`${API_BASE_URL}/api/products`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -177,6 +220,7 @@ const IncomingItems = () => {
   ========================= */
   useEffect(() => {
     fetchProducts();
+    fetchSuppliers();
   }, [token]);
 
   useEffect(() => {
@@ -229,7 +273,7 @@ const IncomingItems = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/incoming-items`, {
+      const res = await fetch(`${API_BASE_URL}/api/incoming-items`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -239,6 +283,8 @@ const IncomingItems = () => {
           receiptId: formData.receiptId,
           date: formData.date,
           supplier: formData.supplier,
+          source: "manual",
+          reference: formData.receiptId,
           items: validItems.map((i) => ({ product: i.product, qty: Number(i.qty) })),
         }),
       });
@@ -261,26 +307,31 @@ const IncomingItems = () => {
   /* =========================
      HANDLE UPDATE STATUS (FSM)
   ========================= */
-  const handleUpdateStatus = async (id: string, event: string) => {
+  const handleUpdateStatus = async (id: string, event: string, note = "") => {
     if (!token) return;
 
     const confirmed = await confirm({
       title: "Update Status",
       description: event === "complete"
-        ? "Selesaikan penerimaan ini? Stock produk akan otomatis bertambah."
-        : "Ubah status ke Proses?",
+        ? "Verifikasi penerimaan ini? Stock produk akan otomatis bertambah."
+        : event === "cancel"
+        ? "Batalkan penerimaan ini?"
+        : event === "reject"
+        ? "Tolak penerimaan ini?"
+        : "Mulai pengecekan barang?",
       confirmText: "Ya, Lanjutkan",
+      variant: event === "cancel" || event === "reject" ? "destructive" : "default",
     });
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/incoming-items/${id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/api/incoming-items/${id}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ event }),
+        body: JSON.stringify({ event, note }),
       });
       const json = await res.json();
       if (json.success) {
@@ -293,6 +344,23 @@ const IncomingItems = () => {
       console.error("Error updating status:", error);
       toast.error("Terjadi kesalahan");
     }
+  };
+
+  const openStatusDialog = (id: string, event: string, title: string) => {
+    setStatusDialog({ id, event, title });
+    setStatusNote("");
+  };
+
+  const submitStatusDialog = () => {
+    if (!statusDialog) return;
+    handleUpdateStatus(statusDialog.id, statusDialog.event, statusNote);
+    setStatusDialog(null);
+    setStatusNote("");
+  };
+
+  const openDetail = (item: IncomingItemData) => {
+    setSelectedIncoming(item);
+    setIsDetailOpen(true);
   };
 
   /* =========================
@@ -309,7 +377,7 @@ const IncomingItems = () => {
     if (!token) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/incoming-items/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/incoming-items/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -418,12 +486,21 @@ const IncomingItems = () => {
 
                     <div className="grid gap-2">
                       <Label>Supplier</Label>
-                      <Input
-                        name="supplier"
-                        placeholder="Contoh: PT Indofood Sukses Makmur"
+                      <Select
                         value={formData.supplier}
-                        onChange={handleInputChange}
-                      />
+                        onValueChange={(value) => setFormData((prev) => ({ ...prev, supplier: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih supplier" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {suppliers.map((supplier) => (
+                            <SelectItem key={supplier._id} value={supplier.name}>
+                              {supplier.name} ({supplier.supplierId})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     {/* Items */}
@@ -506,9 +583,11 @@ const IncomingItems = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Status</SelectItem>
-                  <SelectItem value="completed">Selesai</SelectItem>
+                  <SelectItem value="completed">Terverifikasi</SelectItem>
                   <SelectItem value="pending">Menunggu</SelectItem>
-                  <SelectItem value="in_progress">Proses</SelectItem>
+                  <SelectItem value="in_progress">Pengecekan</SelectItem>
+                  <SelectItem value="cancelled">Dibatalkan</SelectItem>
+                  <SelectItem value="rejected">Ditolak</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -521,6 +600,7 @@ const IncomingItems = () => {
                     <TableHead>ID</TableHead>
                     <TableHead>Tanggal</TableHead>
                     <TableHead>Supplier</TableHead>
+                    <TableHead>Sumber</TableHead>
                     <TableHead className="text-right">Items</TableHead>
                     <TableHead className="text-right">Total Qty</TableHead>
                     <TableHead>Status</TableHead>
@@ -530,7 +610,7 @@ const IncomingItems = () => {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                         Memuat data...
                       </TableCell>
                     </TableRow>
@@ -545,6 +625,16 @@ const IncomingItems = () => {
                           {new Date(item.date).toLocaleDateString("id-ID")}
                         </TableCell>
                         <TableCell className="font-medium">{item.supplier}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <Badge variant="secondary">
+                              {item.source === "purchase_order" ? "PO" : "Manual"}
+                            </Badge>
+                            {item.reference && (
+                              <p className="text-xs text-muted-foreground">{item.reference}</p>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right">{item.totalItems}</TableCell>
                         <TableCell className="text-right font-medium">{item.totalQty}</TableCell>
                         <TableCell>{getStatusBadge(item.status)}</TableCell>
@@ -556,25 +646,50 @@ const IncomingItems = () => {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                className="gap-2"
+                                onClick={() => openDetail(item)}
+                              >
+                                <Eye className="w-4 h-4" />
+                                Detail
+                              </DropdownMenuItem>
                               {item.status === "pending" && (
                                 <DropdownMenuItem
                                   className="gap-2"
                                   onClick={() => handleUpdateStatus(item._id, "process")}
                                 >
                                   <Clock className="w-4 h-4" />
-                                  Proses
+                                  Mulai Cek
                                 </DropdownMenuItem>
                               )}
                               {(item.status === "pending" || item.status === "in_progress") && (
                                 <DropdownMenuItem
                                   className="gap-2"
-                                  onClick={() => handleUpdateStatus(item._id, "complete")}
+                                  onClick={() => openStatusDialog(item._id, "complete", "Verifikasi Barang")}
                                 >
                                   <CheckCircle className="w-4 h-4" />
-                                  Selesaikan
+                                  Verifikasi
                                 </DropdownMenuItem>
                               )}
-                              {item.status !== "completed" && (
+                              {item.status === "pending" && (
+                                <DropdownMenuItem
+                                  className="gap-2 text-red-500 focus:text-red-500"
+                                  onClick={() => openStatusDialog(item._id, "cancel", "Batalkan Penerimaan")}
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                  Batalkan
+                                </DropdownMenuItem>
+                              )}
+                              {item.status === "in_progress" && (
+                                <DropdownMenuItem
+                                  className="gap-2 text-red-500 focus:text-red-500"
+                                  onClick={() => openStatusDialog(item._id, "reject", "Tolak Penerimaan")}
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                  Tolak
+                                </DropdownMenuItem>
+                              )}
+                              {item.status !== "completed" && item.status !== "cancelled" && item.status !== "rejected" && (
                                 <DropdownMenuItem
                                   className="gap-2 text-red-500 focus:text-red-500"
                                   onClick={() => handleDelete(item._id)}
@@ -590,7 +705,7 @@ const IncomingItems = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                         Tidak ada data penerimaan
                       </TableCell>
                     </TableRow>
@@ -611,6 +726,115 @@ const IncomingItems = () => {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+        <DialogContent className="sm:max-w-[620px]">
+          <DialogHeader>
+            <DialogTitle>Detail Penerimaan</DialogTitle>
+            <DialogDescription>Rincian barang masuk dan riwayat status</DialogDescription>
+          </DialogHeader>
+
+          {selectedIncoming && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">ID Penerimaan</p>
+                  <p className="font-medium">{selectedIncoming.receiptId}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Status</p>
+                  {getStatusBadge(selectedIncoming.status)}
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Supplier</p>
+                  <p className="font-medium">{selectedIncoming.supplier}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Sumber</p>
+                  <p className="font-medium">
+                    {selectedIncoming.source === "purchase_order" ? "Purchase Order" : "Manual"}
+                    {selectedIncoming.reference ? ` - ${selectedIncoming.reference}` : ""}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Produk</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedIncoming.items.map((item) => (
+                      <TableRow key={`${selectedIncoming._id}-${item.productName}`}>
+                        <TableCell>{item.productName}</TableCell>
+                        <TableCell className="text-right font-medium">{item.qty}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            {item.status === "verified" ? "Verified" : "Pending"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div>
+                <p className="font-medium mb-2">Riwayat FSM</p>
+                <div className="space-y-2">
+                  {selectedIncoming.statusHistory && selectedIncoming.statusHistory.length > 0 ? (
+                    selectedIncoming.statusHistory.map((history, index) => (
+                      <div key={`${history.event}-${index}`} className="rounded-lg border p-3 text-sm">
+                        <div className="flex justify-between gap-3">
+                          <p className="font-medium">
+                            {history.from || "awal"} {"->"} {history.to}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(history.changedAt).toLocaleString("id-ID")}
+                          </p>
+                        </div>
+                        {history.note && (
+                          <p className="text-muted-foreground mt-1">{history.note}</p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Belum ada riwayat status.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!statusDialog} onOpenChange={(open) => !open && setStatusDialog(null)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{statusDialog?.title}</DialogTitle>
+            <DialogDescription>Tambahkan catatan perubahan status FSM.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Catatan</Label>
+            <Textarea
+              placeholder="Contoh: barang sesuai dengan surat jalan"
+              value={statusNote}
+              onChange={(e) => setStatusNote(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setStatusDialog(null)}>
+              Batal
+            </Button>
+            <Button onClick={submitStatusDialog}>
+              Simpan Status
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialogComponent />
     </DashboardLayout>
   );

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +28,7 @@ import {
   ArrowLeftRight,
   FileBarChart,
   Brain,
+  UserCog,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,6 +73,12 @@ const menuGroups = [
       { title: "Prediksi Stok", url: "/dashboard/forecast", icon: Brain },
     ],
   },
+  {
+    label: "Akun",
+    items: [
+      { title: "Akun Kasir", url: "/dashboard/cashiers", icon: UserCog },
+    ],
+  },
 ];
 
 const AppSidebar = () => {
@@ -78,6 +86,7 @@ const AppSidebar = () => {
   const collapsed = state === "collapsed";
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   const isActive = (path: string) => {
@@ -86,6 +95,7 @@ const AppSidebar = () => {
   };
 
   const handleLogout = () => {
+    queryClient.clear();
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     navigate("/");
@@ -111,10 +121,10 @@ const AppSidebar = () => {
       </SidebarHeader>
 
       {/* Menu */}
-      <SidebarContent className="px-3">
-        {menuGroups.map((group, groupIndex) => (
-          <SidebarGroup key={group.label} className={groupIndex > 0 ? "mt-2" : ""}>
-            <SidebarGroupLabel className="text-[11px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest mb-1 px-3">
+      <SidebarContent className="px-0 space-y-0">
+        {menuGroups.map((group) => (
+          <SidebarGroup key={group.label} className="space-y-0 mt-0">
+            <SidebarGroupLabel className="text-[11px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest px-3 mb-0 py-2">
               {!collapsed && group.label}
             </SidebarGroupLabel>
             <SidebarGroupContent>

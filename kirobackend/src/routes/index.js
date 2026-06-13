@@ -12,6 +12,9 @@ const dashboardRoutes = require('./dashboard');
 const reportRoutes = require('./report');
 const forecastRoutes = require('./forecast');
 const transactionRoutes = require('./transaction');
+const cashierShiftRoutes = require('./cashierShift');
+const cashierAccountRoutes = require('./cashierAccount');
+const paymentRoutes = require('./payment');
 
 // Auth routes
 router.use('/auth', authRoutes);
@@ -48,5 +51,14 @@ router.use('/forecast', forecastRoutes);
 
 // Transaction routes
 router.use('/transactions', transactionRoutes);
+
+// Payment routes
+router.use('/payments', paymentRoutes);
+
+// Cashier shift routes
+router.use('/cashier-shifts', cashierShiftRoutes);
+
+// Cashier account routes
+router.use('/cashier-accounts', cashierAccountRoutes);
 
 module.exports = router;

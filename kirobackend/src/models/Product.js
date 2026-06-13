@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     name: {
       type: String,
       required: [true, 'Nama barang wajib diisi'],
@@ -10,9 +16,14 @@ const productSchema = new mongoose.Schema(
     sku: {
       type: String,
       required: [true, 'SKU wajib diisi'],
-      unique: true,
       trim: true,
       uppercase: true,
+    },
+    barcode: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
     },
     category: {
       type: String,
@@ -50,5 +61,10 @@ productSchema.virtual('status').get(function () {
   if (this.stock <= this.minStock) return 'low';
   return 'normal';
 });
+
+// Compound index: SKU hanya unique per userId
+productSchema.index({ userId: 1, sku: 1 }, { unique: true, sparse: true });
+// Index untuk barcode juga per userId
+productSchema.index({ userId: 1, barcode: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Product', productSchema, 'product');

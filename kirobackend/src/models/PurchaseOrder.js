@@ -22,12 +22,38 @@ const purchaseOrderItemSchema = new mongoose.Schema({
   },
 });
 
+const purchaseOrderStatusHistorySchema = new mongoose.Schema(
+  {
+    from: String,
+    to: String,
+    event: String,
+    note: {
+      type: String,
+      trim: true,
+    },
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const purchaseOrderSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     poNumber: {
       type: String,
       required: [true, 'Nomor PO wajib diisi'],
-      unique: true,
       trim: true,
       uppercase: true,
     },
@@ -51,6 +77,7 @@ const purchaseOrderSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    statusHistory: [purchaseOrderStatusHistorySchema],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -67,5 +94,8 @@ const purchaseOrderSchema = new mongoose.Schema(
 purchaseOrderSchema.virtual('totalItems').get(function () {
   return this.items.length;
 });
+
+// Compound index: poNumber unique per userId
+purchaseOrderSchema.index({ userId: 1, poNumber: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('PurchaseOrder', purchaseOrderSchema, 'purchase_orders');

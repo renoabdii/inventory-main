@@ -89,7 +89,7 @@ const getById = async (req, res, next) => {
 // Tambah penerimaan baru
 const create = async (req, res, next) => {
   try {
-    const { receiptId, date, supplier, items } = req.body;
+    const { receiptId, date, supplier, items, source = 'manual', reference } = req.body;
 
     // Validasi items - pastikan semua product ada
     if (!items || items.length === 0) {
@@ -117,8 +117,17 @@ const create = async (req, res, next) => {
       receiptId,
       date: date || new Date(),
       supplier,
+      source,
+      reference,
       items: itemsWithName,
       status: 'pending',
+      statusHistory: [{
+        from: null,
+        to: 'pending',
+        event: 'create',
+        note: source === 'purchase_order' ? `Dibuat dari PO ${reference || '-'}` : 'Penerimaan manual dibuat',
+        changedBy: req.user._id,
+      }],
       createdBy: req.user._id,
     });
 
@@ -138,7 +147,7 @@ const create = async (req, res, next) => {
 // Event: process, complete
 const updateStatus = async (req, res, next) => {
   try {
-    const { event } = req.body;
+    const { event, note } = req.body;
     const incomingItem = await IncomingItem.findById(req.params.id);
 
     if (!incomingItem) {
@@ -191,6 +200,13 @@ const updateStatus = async (req, res, next) => {
       }
     }
 
+    incomingItem.statusHistory.push({
+      from: incomingItem.status,
+      to: newStatus,
+      event,
+      note,
+      changedBy: req.user._id,
+    });
     incomingItem.status = newStatus;
     await incomingItem.save();
 

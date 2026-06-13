@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
-const API_URL = "http://localhost:3000";
+import { API_BASE_URL } from "@/lib/api";
+import { exportToCsv, exportToStyledXlsx } from "@/lib/export";
 
 import {
   Card,
@@ -13,6 +14,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 import {
   Select,
@@ -21,6 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import {
   Package,
@@ -32,6 +41,7 @@ import {
   ArrowUpCircle,
   Boxes,
   DollarSign,
+  Download,
 } from "lucide-react";
 
 /* =========================
@@ -79,6 +89,11 @@ interface ReportData {
     type: string;
     qty: number;
   }[];
+  paymentSummary: {
+    method: string;
+    count: number;
+    total: number;
+  }[];
 }
 
 /* FORMAT RUPIAH */
@@ -98,6 +113,8 @@ const Reports = () => {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("month");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const token = localStorage.getItem("token");
 
@@ -105,7 +122,13 @@ const Reports = () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/reports?period=${period}`, {
+      const params = new URLSearchParams({ period });
+      if (period === "custom" && startDate && endDate) {
+        params.append("startDate", startDate);
+        params.append("endDate", endDate);
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/reports?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -121,7 +144,51 @@ const Reports = () => {
 
   useEffect(() => {
     fetchReport();
-  }, [period, token]);
+  }, [period, startDate, endDate, token]);
+
+  const handleExportReport = async () => {
+    if (!data) return;
+    const rows = [
+      { Bagian: "Ringkasan", Keterangan: "Total Produk", Jumlah: data.summary.totalProducts, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Stock Kritis", Jumlah: data.summary.criticalCount, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Stock Rendah", Jumlah: data.summary.lowCount, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Total Nilai Inventory", Jumlah: "", Nominal: data.summary.totalValue },
+      { Bagian: "Ringkasan", Keterangan: "Supplier Aktif", Jumlah: data.summary.activeSuppliers, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Total Purchase Order", Jumlah: data.summary.totalPO, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In", Jumlah: data.stockMovement.totalIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out", Jumlah: data.stockMovement.totalOut, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Total Movement", Jumlah: data.stockMovement.total, Nominal: "" },
+      ...data.paymentSummary.map((item) => ({
+        Bagian: "Metode Pembayaran",
+        Keterangan: item.method.toUpperCase(),
+        Jumlah: item.count,
+        Nominal: item.total,
+      })),
+    ];
+
+    await exportToStyledXlsx("report-ely-berkah-mart.xlsx", "Laporan Ringkasan Inventory", rows);
+  };
+
+  const handleExportReportCsv = () => {
+    if (!data) return;
+    exportToCsv("report-ely-berkah-mart.csv", [
+      { Bagian: "Ringkasan", Keterangan: "Total Produk", Jumlah: data.summary.totalProducts, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Stock Kritis", Jumlah: data.summary.criticalCount, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Stock Rendah", Jumlah: data.summary.lowCount, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Total Nilai Inventory", Jumlah: "", Nominal: data.summary.totalValue },
+      { Bagian: "Ringkasan", Keterangan: "Supplier Aktif", Jumlah: data.summary.activeSuppliers, Nominal: "" },
+      { Bagian: "Ringkasan", Keterangan: "Total Purchase Order", Jumlah: data.summary.totalPO, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In", Jumlah: data.stockMovement.totalIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out", Jumlah: data.stockMovement.totalOut, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Total Movement", Jumlah: data.stockMovement.total, Nominal: "" },
+      ...data.paymentSummary.map((item) => ({
+        Bagian: "Metode Pembayaran",
+        Keterangan: item.method.toUpperCase(),
+        Jumlah: item.count,
+        Nominal: item.total,
+      })),
+    ]);
+  };
 
   if (loading || !data) {
     return (
@@ -137,21 +204,46 @@ const Reports = () => {
     <DashboardLayout title="Reports">
       <div className="space-y-6">
         {/* PERIOD FILTER */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Laporan Inventory</h2>
             <p className="text-muted-foreground">Ringkasan data inventory</p>
           </div>
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Periode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="week">Minggu Ini</SelectItem>
-              <SelectItem value="month">Bulan Ini</SelectItem>
-              <SelectItem value="all">Semua Waktu</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="w-full sm:w-44">
+                <SelectValue placeholder="Periode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="week">Minggu Ini</SelectItem>
+                <SelectItem value="month">Bulan Ini</SelectItem>
+                <SelectItem value="custom">Tanggal Custom</SelectItem>
+                <SelectItem value="all">Semua Waktu</SelectItem>
+              </SelectContent>
+            </Select>
+            {period === "custom" && (
+              <>
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <Download className="w-4 h-4" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportReportCsv}>
+                  Export CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportReport}>
+                  Export XLSX
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         {/* SUMMARY STATS */}
@@ -350,6 +442,24 @@ const Reports = () => {
                   <h2 className="text-2xl font-bold">{data.stockMovement.total}</h2>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Metode Pembayaran</CardTitle>
+              <CardDescription>Ringkasan transaksi POS berdasarkan metode bayar</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {data.paymentSummary.map((item) => (
+                <div key={item.method} className="flex items-center justify-between rounded-2xl border p-4">
+                  <div>
+                    <h4 className="font-medium uppercase">{item.method}</h4>
+                    <p className="text-sm text-muted-foreground">{item.count} transaksi</p>
+                  </div>
+                  <p className="font-bold">{formatCurrency(item.total)}</p>
+                </div>
+              ))}
             </CardContent>
           </Card>
 

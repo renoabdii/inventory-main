@@ -15,10 +15,15 @@ const transactionItemSchema = new mongoose.Schema({
 
 const transactionSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
     invoiceNumber: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
     },
     items: [transactionItemSchema],
@@ -35,6 +40,11 @@ const transactionSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    shift: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'CashierShift',
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -47,5 +57,8 @@ const transactionSchema = new mongoose.Schema(
 transactionSchema.virtual('totalItems').get(function () {
   return this.items.reduce((acc, item) => acc + item.qty, 0);
 });
+
+// Compound index: invoiceNumber unique per userId
+transactionSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema, 'transactions');
