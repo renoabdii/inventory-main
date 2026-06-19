@@ -6,8 +6,11 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "test": "node --test",
     "seed:admin": "node src/seeders/adminSeeder.js",
-    "seed:kasir": "node src/seeders/kasirSeeder.js"
+    "seed:kasir": "node src/seeders/kasirSeeder.js",
+    "assign:suppliers": "node scripts/assignProductSuppliers.js",
+    "assign:suppliers:apply": "node scripts/assignProductSuppliers.js --apply"
   },
   "keywords": [],
   "author": "",
@@ -16,7 +19,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "2.8.5",
     "dotenv": "16.4.7",
-    "express": "4.21.2",
+    "express": "^4.22.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "qrcode": "^1.5.4"

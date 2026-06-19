@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import CashierSidebar from "./CashierSidebar";
 import { Bell, Package, AlertTriangle } from "lucide-react";
@@ -31,7 +31,7 @@ const CashierLayout = ({ children, title = "Dashboard Kasir" }: CashierLayoutPro
 
   const token = localStorage.getItem("token");
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (!token) return;
     try {
       // Kasir hanya perlu tahu produk yang stoknya rendah/kritis
@@ -52,13 +52,13 @@ const CashierLayout = ({ children, title = "Dashboard Kasir" }: CashierLayoutPro
     } catch (error) {
       console.error("Error fetching notifications:", error);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [fetchNotifications]);
 
   const getNotifIcon = (type: string) => {
     switch (type) {
@@ -120,7 +120,7 @@ const CashierLayout = ({ children, title = "Dashboard Kasir" }: CashierLayoutPro
                       ))
                     ) : (
                       <div className="p-6 text-center text-sm text-muted-foreground">
-                        Semua stok aman 🎉
+                        Semua stok aman.
                       </div>
                     )}
                   </div>

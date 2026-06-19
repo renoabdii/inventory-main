@@ -4,6 +4,7 @@ import CashierLayout from "@/components/layout/CashierLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ListLoading } from "@/components/LoadingState";
 import {
   AlertTriangle,
   ArrowRight,
@@ -121,11 +122,13 @@ const DashboardKasir = () => {
 
   const quickActions = [
     {
-      label: "Mulai Transaksi",
-      description: "Buka POS untuk penjualan baru",
+      label: activeShift ? "Mulai Transaksi" : "Buka Shift",
+      description: activeShift ? "Buka POS untuk penjualan baru" : "Mulai sesi kerja sebelum transaksi",
       icon: ShoppingBag,
-      path: "/kasir/pos",
-      className: "bg-emerald-500 text-white hover:bg-emerald-600",
+      path: activeShift ? "/kasir/pos" : "/kasir/shift",
+      className: activeShift
+        ? "bg-emerald-500 text-white hover:bg-emerald-600"
+        : "bg-amber-500 text-white hover:bg-amber-600",
     },
     {
       label: "Riwayat",
@@ -163,9 +166,13 @@ const DashboardKasir = () => {
             </p>
           </div>
 
-          <Button size="lg" className="gap-2" onClick={() => navigate("/kasir/pos")}>
+          <Button
+            size="lg"
+            className="gap-2"
+            onClick={() => navigate(activeShift ? "/kasir/pos" : "/kasir/shift")}
+          >
             <ShoppingBag className="w-4 h-4" />
-            Mulai Transaksi
+            {activeShift ? "Mulai Transaksi" : "Buka Shift"}
           </Button>
         </div>
 
@@ -261,7 +268,7 @@ const DashboardKasir = () => {
             </CardHeader>
             <CardContent className="space-y-3">
               {loading ? (
-                <p className="text-sm text-muted-foreground">Memuat stok...</p>
+                <ListLoading rows={4} />
               ) : lowStock.length > 0 ? (
                 lowStock.map((product) => (
                   <div
@@ -303,7 +310,7 @@ const DashboardKasir = () => {
             </CardHeader>
             <CardContent className="space-y-3">
               {loading ? (
-                <p className="text-sm text-muted-foreground">Memuat transaksi...</p>
+                <ListLoading rows={4} />
               ) : recentTransactions.length > 0 ? (
                 recentTransactions.map((transaction) => {
                   const totalItems = transaction.items.reduce((acc, item) => acc + item.qty, 0);

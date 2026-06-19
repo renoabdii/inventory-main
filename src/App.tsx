@@ -25,6 +25,7 @@ import Supplier from "./pages/Supplier";
 import Report from "./pages/Report";
 import Forecasting from "./pages/Forecasting";
 import CashierAccounts from "./pages/CashierAccounts";
+import CashierShiftAudit from "./pages/CashierShiftAudit";
 import RequireRole from "./components/RequireRole";
 
 const queryClient = new QueryClient();
@@ -133,6 +134,14 @@ const App = () => (
             element={
               <RequireRole allowedRoles={["admin"]}>
                 <CashierAccounts />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/dashboard/shift-audit"
+            element={
+              <RequireRole allowedRoles={["admin"]}>
+                <CashierShiftAudit />
               </RequireRole>
             }
           />

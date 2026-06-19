@@ -5,9 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { User, Lock } from "lucide-react";
+import { User, Lock, Loader2 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { getPasswordError } from "@/lib/password";
 
 const Profile = () => {
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -25,8 +26,9 @@ const Profile = () => {
       toast.warning("Password baru tidak cocok");
       return;
     }
-    if (passwordForm.newPassword.length < 6) {
-      toast.warning("Password minimal 6 karakter");
+    const passwordError = getPasswordError(passwordForm.newPassword);
+    if (passwordError) {
+      toast.warning(passwordError);
       return;
     }
     if (!token) return;
@@ -43,6 +45,7 @@ const Profile = () => {
       });
       const json = await res.json();
       if (json.success) {
+        if (json.data?.token) localStorage.setItem("token", json.data.token);
         toast.success("Password berhasil diubah!");
         setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       } else {
@@ -116,7 +119,14 @@ const Profile = () => {
               />
             </div>
             <Button onClick={handleChangePassword} disabled={loading}>
-              {loading ? "Menyimpan..." : "Ubah Password"}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Menyimpan...
+                </span>
+              ) : (
+                "Ubah Password"
+              )}
             </Button>
           </CardContent>
         </Card>

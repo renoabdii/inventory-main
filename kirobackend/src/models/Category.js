@@ -33,5 +33,6 @@ const categorySchema = new mongoose.Schema(
 
 // Compound index: name unique per userId
 categorySchema.index({ userId: 1, name: 1 }, { unique: true, sparse: true });
+categorySchema.index({ userId: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Category', categorySchema, 'category');

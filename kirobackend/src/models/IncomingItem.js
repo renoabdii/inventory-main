@@ -107,5 +107,8 @@ incomingItemSchema.virtual('totalQty').get(function () {
 
 // Compound index: receiptId unique per userId
 incomingItemSchema.index({ userId: 1, receiptId: 1 }, { unique: true, sparse: true });
+incomingItemSchema.index({ userId: 1, status: 1, createdAt: -1 });
+incomingItemSchema.index({ userId: 1, source: 1, createdAt: -1 });
+incomingItemSchema.index({ userId: 1, date: -1 });
 
 module.exports = mongoose.model('IncomingItem', incomingItemSchema, 'incoming_items');

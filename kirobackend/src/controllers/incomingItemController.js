@@ -11,8 +11,8 @@ const getStockState = (stock, minStock) => {
 // Get semua incoming items
 const getAll = async (req, res, next) => {
   try {
-    const { search, status, page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const { search, status, source, page = 1, limit = 10 } = req.query;
+    const filter = { userId: req.user.id };
 
     if (search) {
       filter.$or = [
@@ -23,6 +23,10 @@ const getAll = async (req, res, next) => {
 
     if (status && status !== 'all') {
       filter.status = status;
+    }
+
+    if (source && source !== 'all') {
+      filter.source = source;
     }
 
     const pageNum = parseInt(page);
@@ -42,7 +46,7 @@ const getAll = async (req, res, next) => {
     const weekAgo = new Date(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
 
-    const allItems = await IncomingItem.find();
+    const allItems = await IncomingItem.find({ userId: req.user.id });
 
     const todayItems = allItems.filter((i) => new Date(i.date) >= today);
     const weekItems = allItems.filter((i) => new Date(i.date) >= weekAgo);
@@ -72,7 +76,7 @@ const getAll = async (req, res, next) => {
 // Get by ID
 const getById = async (req, res, next) => {
   try {
-    const item = await IncomingItem.findById(req.params.id)
+    const item = await IncomingItem.findOne({ _id: req.params.id, userId: req.user.id })
       .populate('items.product', 'name sku stock minStock price')
       .populate('createdBy', 'username');
 
@@ -98,7 +102,7 @@ const create = async (req, res, next) => {
 
     const itemsWithName = [];
     for (const item of items) {
-      const product = await Product.findById(item.product);
+      const product = await Product.findOne({ _id: item.product, userId: req.user.id });
       if (!product) {
         return res.status(400).json({
           success: false,
@@ -114,6 +118,7 @@ const create = async (req, res, next) => {
     }
 
     const incomingItem = await IncomingItem.create({
+      userId: req.user.id,
       receiptId,
       date: date || new Date(),
       supplier,
@@ -148,7 +153,7 @@ const create = async (req, res, next) => {
 const updateStatus = async (req, res, next) => {
   try {
     const { event, note } = req.body;
-    const incomingItem = await IncomingItem.findById(req.params.id);
+    const incomingItem = await IncomingItem.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!incomingItem) {
       return res.status(404).json({ success: false, message: 'Penerimaan tidak ditemukan' });
@@ -165,7 +170,7 @@ const updateStatus = async (req, res, next) => {
     // Jika completed: update stock & catat movement
     if (newStatus === 'completed') {
       for (const item of incomingItem.items) {
-        const product = await Product.findById(item.product);
+        const product = await Product.findOne({ _id: item.product, userId: req.user.id });
         if (!product) continue;
 
         const stockBefore = product.stock;
@@ -179,6 +184,7 @@ const updateStatus = async (req, res, next) => {
 
         // Catat stock movement
         await StockMovement.create({
+          userId: req.user.id,
           product: product._id,
           productName: product.name,
           sku: product.sku,
@@ -222,7 +228,7 @@ const updateStatus = async (req, res, next) => {
 // Hapus penerimaan (hanya jika masih pending)
 const remove = async (req, res, next) => {
   try {
-    const incomingItem = await IncomingItem.findById(req.params.id);
+    const incomingItem = await IncomingItem.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!incomingItem) {
       return res.status(404).json({ success: false, message: 'Penerimaan tidak ditemukan' });
@@ -235,7 +241,7 @@ const remove = async (req, res, next) => {
       });
     }
 
-    await IncomingItem.findByIdAndDelete(req.params.id);
+    await IncomingItem.deleteOne({ _id: req.params.id, userId: req.user.id });
     res.json({ success: true, message: 'Penerimaan berhasil dihapus' });
   } catch (error) {
     next(error);

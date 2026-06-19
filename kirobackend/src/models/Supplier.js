@@ -44,5 +44,7 @@ const supplierSchema = new mongoose.Schema(
 
 // Compound index: supplierId unique per userId
 supplierSchema.index({ userId: 1, supplierId: 1 }, { unique: true, sparse: true });
+supplierSchema.index({ userId: 1, status: 1, createdAt: -1 });
+supplierSchema.index({ userId: 1, name: 1 });
 
 module.exports = mongoose.model('Supplier', supplierSchema, 'suppliers');

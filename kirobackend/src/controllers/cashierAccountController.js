@@ -1,16 +1,11 @@
 const User = require('../models/User');
+const { buildOwnedCashierFilter } = require('../utils/accountScope');
+const { validatePassword } = require('../utils/passwordPolicy');
 
 const list = async (req, res, next) => {
   try {
     const { search = '', page = 1, limit = 10 } = req.query;
-    const filter = {
-      role: 'kasir',
-      $or: [
-        { adminId: req.user.id },
-        { adminId: { $exists: false } },
-        { adminId: null },
-      ],
-    };
+    const filter = buildOwnedCashierFilter(req.user._id);
 
     if (search) {
       filter.username = { $regex: search, $options: 'i' };
@@ -50,6 +45,11 @@ const create = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Username dan password wajib diisi' });
     }
 
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.valid) {
+      return res.status(400).json({ success: false, message: passwordCheck.message });
+    }
+
     const existing = await User.findOne({ username });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Username sudah digunakan' });
@@ -76,15 +76,9 @@ const create = async (req, res, next) => {
 const update = async (req, res, next) => {
   try {
     const { name, username, password, isActive } = req.body;
-    const cashier = await User.findOne({
-      _id: req.params.id,
-      role: 'kasir',
-      $or: [
-        { adminId: req.user.id },
-        { adminId: { $exists: false } },
-        { adminId: null },
-      ],
-    });
+    const cashier = await User.findOne(
+      buildOwnedCashierFilter(req.user._id, req.params.id)
+    );
 
     if (!cashier) {
       return res.status(404).json({ success: false, message: 'Akun kasir tidak ditemukan' });
@@ -102,15 +96,22 @@ const update = async (req, res, next) => {
       cashier.name = name;
     }
 
-    cashier.adminId = req.user.id;
-
+    let invalidateTokens = false;
     if (password) {
+      const passwordCheck = validatePassword(password);
+      if (!passwordCheck.valid) {
+        return res.status(400).json({ success: false, message: passwordCheck.message });
+      }
       cashier.password = password;
+      invalidateTokens = true;
     }
 
     if (typeof isActive === 'boolean') {
+      if (cashier.isActive && !isActive) invalidateTokens = true;
       cashier.isActive = isActive;
     }
+
+    if (invalidateTokens) cashier.tokenVersion = (cashier.tokenVersion || 0) + 1;
 
     await cashier.save();
 

@@ -29,6 +29,7 @@ import {
   FileBarChart,
   Brain,
   UserCog,
+  ClipboardCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +78,7 @@ const menuGroups = [
     label: "Akun",
     items: [
       { title: "Akun Kasir", url: "/dashboard/cashiers", icon: UserCog },
+      { title: "Audit Shift", url: "/dashboard/shift-audit", icon: ClipboardCheck },
     ],
   },
 ];

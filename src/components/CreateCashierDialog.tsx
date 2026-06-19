@@ -10,8 +10,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, Check } from "lucide-react";
+import { AlertCircle, Check, Loader2 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
+import { getPasswordError } from "@/lib/password";
 
 interface CreateCashierDialogProps {
   onSuccess?: () => void;
@@ -52,8 +53,9 @@ export default function CreateCashierDialog({ onSuccess }: CreateCashierDialogPr
       return;
     }
 
-    if (formData.password.length < 6) {
-      setError("Password minimal 6 karakter");
+    const passwordError = getPasswordError(formData.password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -209,7 +211,14 @@ export default function CreateCashierDialog({ onSuccess }: CreateCashierDialogPr
               type="submit"
               disabled={loading || success}
             >
-              {loading ? "Membuat..." : "Buat Akun"}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Membuat...
+                </span>
+              ) : (
+                "Buat Akun"
+              )}
             </Button>
           </div>
         </form>

@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { useDebounce } from "@/hooks/useDebounce";
 
 import { API_BASE_URL } from "@/lib/api";
+import { formatCurrency, parseCurrencyInput } from "@/lib/currency";
 import { exportToCsv, exportToStyledXlsx } from "@/lib/export";
 
 import {
@@ -107,18 +109,6 @@ const getStatusBadge = (status: string) => {
 };
 
 /* =========================
-   FORMAT RUPIAH
-========================= */
-
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(value);
-};
-
-/* =========================
    COMPONENT
 ========================= */
 
@@ -128,6 +118,7 @@ interface ProductItem {
   sku: string;
   barcode?: string;
   category: string;
+  supplier?: { _id: string; name: string; supplierId: string } | string | null;
   stock: number;
   minStock: number;
   price: number;
@@ -164,10 +155,23 @@ interface ImportErrorRow {
   errors: string[];
 }
 
+interface SupplierOption {
+  _id: string;
+  name: string;
+  supplierId: string;
+  status: string;
+}
+
+const getSupplierValue = (supplier: ProductItem["supplier"]): string => {
+  if (!supplier) return "none";
+  return typeof supplier === "string" ? supplier : supplier._id;
+};
+
 const Inventory = () => {
   const location = useLocation();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -176,12 +180,14 @@ const Inventory = () => {
   const [inventoryData, setInventoryData] = useState<ProductItem[]>([]);
   const [lowStockData, setLowStockData] = useState<ProductItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [stats, setStats] = useState({ total: 0, lowStock: 0, criticalStock: 0, totalValue: 0 });
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
   const [stockHistory, setStockHistory] = useState<StockHistoryItem[]>([]);
   const [importRows, setImportRows] = useState<ImportProductRow[]>([]);
   const [importErrors, setImportErrors] = useState<ImportErrorRow[]>([]);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -190,6 +196,7 @@ const Inventory = () => {
     sku: "",
     barcode: "",
     category: "",
+    supplier: "none",
     stock: "",
     minStock: "",
     price: "",
@@ -200,6 +207,7 @@ const Inventory = () => {
     sku: "",
     barcode: "",
     category: "",
+    supplier: "none",
     stock: "",
     minStock: "",
     price: "",
@@ -255,12 +263,12 @@ const Inventory = () => {
   /* =========================
      FETCH PRODUCTS
   ========================= */
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       if (categoryFilter !== "all") params.append("category", categoryFilter);
       params.append("page", String(currentPage));
       params.append("limit", "10");
@@ -284,12 +292,12 @@ const Inventory = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [categoryFilter, currentPage, debouncedSearchQuery, location.search, token]);
 
   /* =========================
      FETCH CATEGORIES
   ========================= */
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/categories`, {
@@ -306,12 +314,27 @@ const Inventory = () => {
     } catch (error) {
       console.error("Error fetching categories:", error);
     }
-  };
+  }, [token]);
+
+  const fetchSuppliers = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers?limit=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuppliers(json.data.filter((supplier: SupplierOption) => supplier.status === "ACTIVE"));
+      }
+    } catch (error) {
+      console.error("Error fetching suppliers:", error);
+    }
+  }, [token]);
 
   /* =========================
      FETCH LOW STOCK
   ========================= */
-  const fetchLowStock = async () => {
+  const fetchLowStock = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/products/low-stock`, {
@@ -324,22 +347,23 @@ const Inventory = () => {
     } catch (error) {
       console.error("Error fetching low stock:", error);
     }
-  };
+  }, [token]);
 
   /* =========================
      USEEFFECT - FETCH CATEGORIES
   ========================= */
   useEffect(() => {
     fetchCategories();
+    fetchSuppliers();
     fetchLowStock();
-  }, [token]);
+  }, [fetchCategories, fetchLowStock, fetchSuppliers]);
 
   /* =========================
      USEEFFECT - FETCH PRODUCTS
   ========================= */
   useEffect(() => {
     fetchProducts();
-  }, [searchQuery, categoryFilter, currentPage, token]);
+  }, [fetchProducts]);
 
   const filteredData = inventoryData;
 
@@ -354,7 +378,7 @@ const Inventory = () => {
 
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: name === "price" ? parseCurrencyInput(value) : value,
     }));
   };
 
@@ -364,6 +388,13 @@ const Inventory = () => {
     setFormData((prev) => ({
       ...prev,
       category: value,
+    }));
+  };
+
+  const handleSupplierChange = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      supplier: value,
     }));
   };
 
@@ -385,6 +416,7 @@ const Inventory = () => {
           sku: formData.sku,
           barcode: formData.barcode || undefined,
           category: formData.category,
+          supplier: formData.supplier === "none" ? undefined : formData.supplier,
           stock: Number(formData.stock),
           minStock: Number(formData.minStock),
           price: Number(formData.price),
@@ -398,6 +430,7 @@ const Inventory = () => {
           sku: "",
           barcode: "",
           category: "",
+          supplier: "none",
           stock: "",
           minStock: "",
           price: "",
@@ -469,13 +502,25 @@ const Inventory = () => {
     }
   };
 
-  const handleExportInventory = async () => {
-    const rows = inventoryData.map((item, index) => ({
+  const getSupplierExportValue = (supplier: ProductItem["supplier"]) => {
+    if (!supplier || typeof supplier === "string") return "Belum ditentukan";
+    return supplier.name;
+  };
+
+  const getSupplierCodeExportValue = (supplier: ProductItem["supplier"]) => {
+    if (!supplier || typeof supplier === "string") return "";
+    return supplier.supplierId;
+  };
+
+  const buildInventoryExportRows = (products: ProductItem[]) =>
+    products.map((item, index) => ({
       No: index + 1,
       "Nama Barang": item.name,
       SKU: item.sku,
       Barcode: item.barcode || "",
       Kategori: item.category,
+      Supplier: getSupplierExportValue(item.supplier),
+      "Kode Supplier": getSupplierCodeExportValue(item.supplier),
       Stok: item.stock,
       "Min Stok": item.minStock,
       Harga: item.price,
@@ -488,34 +533,73 @@ const Inventory = () => {
           : "Normal",
     }));
 
-    await exportToStyledXlsx(
-      "inventory-ely-berkah-mart.xlsx",
-      "Laporan Inventory",
-      rows
-    );
+  const fetchProductsForExport = async (filtered: boolean) => {
+    if (!token) throw new Error("Token tidak ditemukan. Silakan login kembali.");
+
+    const params = new URLSearchParams();
+    if (filtered) {
+      if (searchQuery.trim()) params.append("search", searchQuery.trim());
+      if (categoryFilter !== "all") params.append("category", categoryFilter);
+      const status = new URLSearchParams(location.search).get("status");
+      if (status === "normal" || status === "low" || status === "critical") {
+        params.append("status", status);
+      }
+    }
+
+    const query = params.toString();
+    const res = await fetch(`${API_BASE_URL}/api/products/export${query ? `?${query}` : ""}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.message || "Gagal mengambil data export");
+    }
+
+    return json.data as ProductItem[];
   };
 
-  const handleExportInventoryCsv = () => {
-    exportToCsv(
-      "inventory-ely-berkah-mart.csv",
-      inventoryData.map((item, index) => ({
-        No: index + 1,
-        "Nama Barang": item.name,
-        SKU: item.sku,
-        Barcode: item.barcode || "",
-        Kategori: item.category,
-        Stok: item.stock,
-        "Min Stok": item.minStock,
-        Harga: item.price,
-        "Nilai Stok": item.price * item.stock,
-        Status:
-          item.status === "critical"
-            ? "Kritis"
-            : item.status === "low"
-            ? "Rendah"
-            : "Normal",
-      }))
-    );
+  const getInventoryExportFilename = (extension: "xlsx" | "csv") => {
+    const parts = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value || "00";
+    const date = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+    return `inventory-ely-berkah-mart-${date}.${extension}`;
+  };
+
+  const handleExportInventory = async (
+    format: "xlsx" | "csv",
+    filtered: boolean
+  ) => {
+    setExporting(true);
+    try {
+      const products = await fetchProductsForExport(filtered);
+      if (products.length === 0) {
+        toast.warning("Tidak ada produk yang sesuai untuk diexport.");
+        return;
+      }
+
+      const rows = buildInventoryExportRows(products);
+      if (format === "xlsx") {
+        await exportToStyledXlsx(
+          getInventoryExportFilename("xlsx"),
+          filtered ? "Laporan Inventory Sesuai Filter" : "Laporan Seluruh Inventory",
+          rows
+        );
+      } else {
+        exportToCsv(getInventoryExportFilename("csv"), rows);
+      }
+
+      toast.success(`${products.length} produk berhasil diexport.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal melakukan export produk");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleDownloadTemplate = async () => {
@@ -642,6 +726,7 @@ const Inventory = () => {
       sku: item.sku,
       barcode: item.barcode || "",
       category: item.category,
+      supplier: getSupplierValue(item.supplier),
       stock: String(item.stock),
       minStock: String(item.minStock),
       price: String(item.price),
@@ -651,11 +736,18 @@ const Inventory = () => {
 
   const handleEditInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setEditFormData((prev) => ({ ...prev, [name]: value }));
+    setEditFormData((prev) => ({
+      ...prev,
+      [name]: name === "price" ? parseCurrencyInput(value) : value,
+    }));
   };
 
   const handleEditCategoryChange = (value: string) => {
     setEditFormData((prev) => ({ ...prev, category: value }));
+  };
+
+  const handleEditSupplierChange = (value: string) => {
+    setEditFormData((prev) => ({ ...prev, supplier: value }));
   };
 
   const handleUpdate = async () => {
@@ -676,6 +768,7 @@ const Inventory = () => {
           sku: editFormData.sku,
           barcode: editFormData.barcode || undefined,
           category: editFormData.category,
+          supplier: editFormData.supplier === "none" ? undefined : editFormData.supplier,
           stock: Number(editFormData.stock),
           minStock: Number(editFormData.minStock),
           price: Number(editFormData.price),
@@ -823,7 +916,7 @@ const Inventory = () => {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">Semua stok aman 🎉</p>
+                <p className="text-sm text-muted-foreground">Semua stok aman.</p>
               )}
             </div>
           </CardContent>
@@ -842,10 +935,11 @@ const Inventory = () => {
                 </CardTitle>
 
                 <CardDescription>
-                  Kelola semua data barang
+                  Master data produk, stok minimum, supplier, import, dan export inventory
                 </CardDescription>
               </div>
 
+              <div className="flex flex-col sm:flex-row gap-2">
               {/* ADD PRODUCT */}
               <Dialog
                 open={isDialogOpen}
@@ -942,6 +1036,28 @@ const Inventory = () => {
                       </Select>
                     </div>
 
+                    <div>
+                      <Label>Supplier</Label>
+
+                      <Select
+                        value={formData.supplier}
+                        onValueChange={handleSupplierChange}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih supplier" />
+                        </SelectTrigger>
+
+                        <SelectContent>
+                          <SelectItem value="none">Belum ditentukan</SelectItem>
+                          {suppliers.map((supplier) => (
+                            <SelectItem key={supplier._id} value={supplier._id}>
+                              {supplier.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Stock</Label>
@@ -980,14 +1096,15 @@ const Inventory = () => {
                       <Label>Harga</Label>
 
                       <Input
-                        type="number"
+                        inputMode="numeric"
                         name="price"
                         value={
-                          formData.price
+                          formData.price ? formatCurrency(Number(formData.price)) : ""
                         }
                         onChange={
                           handleInputChange
                         }
+                        placeholder="Rp 0"
                       />
                     </div>
 
@@ -1014,121 +1131,127 @@ const Inventory = () => {
                   </div>
                 </DialogContent>
               </Dialog>
-              <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="gap-2">
-                    <Upload className="w-4 h-4" />
-                    Import
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Import Data Inventory</DialogTitle>
-                    <DialogDescription>
-                      Upload file CSV/XLSX dengan kolom sesuai template.
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <div className="space-y-4">
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Button variant="outline" onClick={handleDownloadTemplate}>
-                        Download Template
+                <div className="flex gap-2">
+                  <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="gap-2">
+                        <Upload className="w-4 h-4" />
+                        Import
                       </Button>
-                      <Input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        onChange={handleImportFile}
-                      />
-                    </div>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Import Data Inventory</DialogTitle>
+                        <DialogDescription>
+                          Upload file CSV/XLSX dengan kolom sesuai template.
+                        </DialogDescription>
+                      </DialogHeader>
 
-                    <div className="rounded-lg border p-3 text-sm text-muted-foreground">
-                      Kolom wajib: Nama Barang, SKU, Kategori, Stok, Min Stok, Harga.
-                      Barcode opsional. Kategori harus sudah aktif di sistem.
-                    </div>
-
-                    {importRows.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="font-medium">Preview ({importRows.length} baris)</p>
-                          <Badge variant="secondary">Create produk baru</Badge>
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Button variant="outline" onClick={handleDownloadTemplate}>
+                            Download Template
+                          </Button>
+                          <Input
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            onChange={handleImportFile}
+                          />
                         </div>
 
-                        <div className="rounded-lg border overflow-hidden">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/50">
-                                <TableHead>Nama</TableHead>
-                                <TableHead>SKU</TableHead>
-                                <TableHead>Kategori</TableHead>
-                                <TableHead className="text-right">Stok</TableHead>
-                                <TableHead className="text-right">Harga</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {importRows.slice(0, 6).map((row, index) => (
-                                <TableRow key={`${row.sku}-${index}`}>
-                                  <TableCell>{row.name}</TableCell>
-                                  <TableCell>{row.sku}</TableCell>
-                                  <TableCell>{row.category}</TableCell>
-                                  <TableCell className="text-right">{row.stock}</TableCell>
-                                  <TableCell className="text-right">{formatCurrency(row.price || 0)}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
+                        <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+                          Kolom wajib: Nama Barang, SKU, Kategori, Stok, Min Stok, Harga.
+                          Barcode opsional. Kategori harus sudah aktif di sistem.
                         </div>
 
-                        {importRows.length > 6 && (
-                          <p className="text-xs text-muted-foreground">
-                            Menampilkan 6 baris pertama dari {importRows.length} baris.
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {importErrors.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="font-medium text-red-500">Data yang gagal diimport</p>
-                        <div className="max-h-48 overflow-y-auto rounded-lg border">
-                          {importErrors.map((error) => (
-                            <div key={`${error.row}-${error.sku}`} className="border-b p-3 text-sm last:border-0">
-                              <p className="font-medium">
-                                Baris {error.row}: {error.sku || error.name || "-"}
-                              </p>
-                              <p className="text-red-500">{error.errors.join(", ")}</p>
+                        {importRows.length > 0 && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <p className="font-medium">Preview ({importRows.length} baris)</p>
+                              <Badge variant="secondary">Create produk baru</Badge>
                             </div>
-                          ))}
+
+                            <div className="rounded-lg border overflow-hidden">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-muted/50">
+                                    <TableHead>Nama</TableHead>
+                                    <TableHead>SKU</TableHead>
+                                    <TableHead>Kategori</TableHead>
+                                    <TableHead className="text-right">Stok</TableHead>
+                                    <TableHead className="text-right">Harga</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {importRows.slice(0, 6).map((row, index) => (
+                                    <TableRow key={`${row.sku}-${index}`}>
+                                      <TableCell>{row.name}</TableCell>
+                                      <TableCell>{row.sku}</TableCell>
+                                      <TableCell>{row.category}</TableCell>
+                                      <TableCell className="text-right">{row.stock}</TableCell>
+                                      <TableCell className="text-right">{formatCurrency(row.price || 0)}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+
+                            {importRows.length > 6 && (
+                              <p className="text-xs text-muted-foreground">
+                                Menampilkan 6 baris pertama dari {importRows.length} baris.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {importErrors.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="font-medium text-red-500">Data yang gagal diimport</p>
+                            <div className="max-h-48 overflow-y-auto rounded-lg border">
+                              {importErrors.map((error) => (
+                                <div key={`${error.row}-${error.sku}`} className="border-b p-3 text-sm last:border-0">
+                                  <p className="font-medium">
+                                    Baris {error.row}: {error.sku || error.name || "-"}
+                                  </p>
+                                  <p className="text-red-500">{error.errors.join(", ")}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setIsImportOpen(false)}>
+                            Tutup
+                          </Button>
+                          <Button onClick={handleImportSubmit} disabled={importing || importRows.length === 0}>
+                            {importing ? "Mengimport..." : "Konfirmasi Import"}
+                          </Button>
                         </div>
                       </div>
-                    )}
-
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsImportOpen(false)}>
-                        Tutup
+                    </DialogContent>
+                  </Dialog>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="gap-2" disabled={exporting}>
+                        <Download className="w-4 h-4" />
+                        {exporting ? "Mengexport..." : "Export"}
                       </Button>
-                      <Button onClick={handleImportSubmit} disabled={importing || importRows.length === 0}>
-                        {importing ? "Mengimport..." : "Konfirmasi Import"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="gap-2">
-                    <Download className="w-4 h-4" />
-                    Export
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleExportInventoryCsv}>
-                    Export CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleExportInventory}>
-                    Export XLSX
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleExportInventory("xlsx", false)}>
+                        XLSX — Semua Produk
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleExportInventory("xlsx", true)}>
+                        XLSX — Sesuai Filter
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleExportInventory("csv", true)}>
+                        CSV — Sesuai Filter
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
             </div>
           </CardHeader>
 
@@ -1194,6 +1317,10 @@ const Inventory = () => {
                       Kategori
                     </TableHead>
 
+                    <TableHead>
+                      Supplier
+                    </TableHead>
+
                     <TableHead className="text-right">
                       Stock
                     </TableHead>
@@ -1250,6 +1377,10 @@ const Inventory = () => {
                                 item.category
                               }
                             </Badge>
+                          </TableCell>
+
+                          <TableCell className="text-sm text-muted-foreground">
+                            {typeof item.supplier === "object" && item.supplier ? item.supplier.name : "-"}
                           </TableCell>
 
                           {/* STOCK */}
@@ -1336,10 +1467,13 @@ const Inventory = () => {
                   ) : (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="h-32 text-center text-muted-foreground"
                       >
-                        Tidak ada barang ditemukan
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Tidak ada barang ditemukan</p>
+                          <p className="text-sm">Tambahkan produk baru atau ubah filter pencarian.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}
@@ -1392,6 +1526,15 @@ const Inventory = () => {
                   <p className="text-sm text-muted-foreground">Status</p>
                   {getStatusBadge(selectedProduct.status)}
                 </div>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Supplier</p>
+                <p className="font-medium">
+                  {typeof selectedProduct.supplier === "object" && selectedProduct.supplier
+                    ? selectedProduct.supplier.name
+                    : "Belum ditentukan"}
+                </p>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -1535,6 +1678,26 @@ const Inventory = () => {
               </Select>
             </div>
 
+            <div>
+              <Label>Supplier</Label>
+              <Select
+                value={editFormData.supplier}
+                onValueChange={handleEditSupplierChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih supplier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Belum ditentukan</SelectItem>
+                  {suppliers.map((supplier) => (
+                    <SelectItem key={supplier._id} value={supplier._id}>
+                      {supplier.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Stock</Label>
@@ -1559,10 +1722,11 @@ const Inventory = () => {
             <div>
               <Label>Harga</Label>
               <Input
-                type="number"
+                inputMode="numeric"
                 name="price"
-                value={editFormData.price}
+                value={editFormData.price ? formatCurrency(Number(editFormData.price)) : ""}
                 onChange={handleEditInputChange}
+                placeholder="Rp 0"
               />
             </div>
           </div>

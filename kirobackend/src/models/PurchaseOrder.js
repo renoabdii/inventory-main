@@ -97,5 +97,8 @@ purchaseOrderSchema.virtual('totalItems').get(function () {
 
 // Compound index: poNumber unique per userId
 purchaseOrderSchema.index({ userId: 1, poNumber: 1 }, { unique: true, sparse: true });
+purchaseOrderSchema.index({ userId: 1, status: 1, createdAt: -1 });
+purchaseOrderSchema.index({ userId: 1, supplier: 1, createdAt: -1 });
+purchaseOrderSchema.index({ userId: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('PurchaseOrder', purchaseOrderSchema, 'purchase_orders');

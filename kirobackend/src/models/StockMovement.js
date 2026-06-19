@@ -55,7 +55,15 @@ const stockMovementSchema = new mongoose.Schema(
     },
     referenceModel: {
       type: String,
-      enum: ['IncomingItem', 'Manual'],
+      enum: [
+        'IncomingItem',
+        'PurchaseOrder',
+        'Transaction',
+        'InitialStock',
+        'Import',
+        'Adjustment',
+        'Manual',
+      ],
       default: 'Manual',
     },
     referenceId: {
@@ -74,5 +82,9 @@ const stockMovementSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+stockMovementSchema.index({ userId: 1, createdAt: -1 });
+stockMovementSchema.index({ userId: 1, type: 1, createdAt: -1 });
+stockMovementSchema.index({ userId: 1, product: 1, createdAt: -1 });
 
 module.exports = mongoose.model('StockMovement', stockMovementSchema, 'stock_movements');

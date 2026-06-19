@@ -162,7 +162,8 @@ const finalizePayment = async (payment) => {
       previousState,
       newState: getStockState(product.stock, product.minStock),
       reference: transaction.invoiceNumber,
-      referenceModel: 'Manual',
+      referenceModel: 'Transaction',
+      referenceId: transaction._id,
       note: `Penjualan QRIS Xendit - ${transaction.invoiceNumber}`,
       createdBy: payment.cashier,
     });
@@ -213,6 +214,10 @@ const createQris = async (req, res, next) => {
 
     const { paymentItems, totalAmount } = await buildPaymentItems(items, userId);
     const activeShift = await CashierShift.findOne({ cashier: req.user._id, status: 'open' });
+    if (!activeShift) {
+      return res.status(400).json({ success: false, message: 'Shift kasir belum dibuka' });
+    }
+
     const orderId = generateOrderId();
     const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
 
@@ -243,7 +248,7 @@ const createQris = async (req, res, next) => {
       orderId,
       userId,
       cashier: req.user._id,
-      shift: activeShift?._id || null,
+      shift: activeShift._id,
       items: paymentItems,
       totalAmount,
       provider: 'xendit',
@@ -263,6 +268,7 @@ const createQris = async (req, res, next) => {
         status: payment.status,
         totalAmount: payment.totalAmount,
         expiredAt: payment.expiredAt,
+        simulationEnabled: process.env.NODE_ENV !== 'production',
       },
     });
   } catch (error) {
@@ -338,29 +344,50 @@ const simulatePaid = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Payment tidak ditemukan' });
     }
 
-    if (payment.status !== 'settlement') {
-      payment.status = 'settlement';
-      payment.paidAt = new Date();
-      payment.rawResponse = {
-        ...(payment.rawResponse || {}),
-        simulated: true,
-        status: 'SUCCEEDED',
-        paid_at: payment.paidAt,
-      };
-      await payment.save();
+    const paidAt = new Date();
+    const callbackPayload = {
+      id: payment.providerTransactionId || `qr_callback_sim_${payment.orderId}`,
+      external_id: payment.orderId,
+      status: 'SUCCEEDED',
+      paid_at: paidAt.toISOString(),
+      simulated: true,
+      source: 'local_sandbox_callback',
+    };
+
+    const callbackUrl = process.env.XENDIT_CALLBACK_URL;
+
+    if (callbackUrl) {
+      const { callbackToken } = getXenditConfig();
+      const callbackResponse = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(callbackToken ? { 'x-callback-token': callbackToken } : {}),
+        },
+        body: JSON.stringify(callbackPayload),
+      });
+
+      if (!callbackResponse.ok) {
+        const text = await callbackResponse.text();
+        return res.status(502).json({
+          success: false,
+          message: `Simulasi callback gagal: ${text || callbackResponse.statusText}`,
+        });
+      }
+    } else {
+      await applyXenditStatus(callbackPayload);
     }
 
-    const transaction = await finalizePayment(payment);
-    await payment.populate('transaction');
+    const refreshed = await Payment.findById(payment._id).populate('transaction');
 
     res.json({
       success: true,
       data: {
-        orderId: payment.orderId,
-        status: payment.status,
-        totalAmount: payment.totalAmount,
-        qrCodeUrl: payment.qrCodeUrl,
-        transaction: payment.transaction || transaction,
+        orderId: refreshed.orderId,
+        status: refreshed.status,
+        totalAmount: refreshed.totalAmount,
+        qrCodeUrl: refreshed.qrCodeUrl,
+        transaction: refreshed.transaction,
       },
     });
   } catch (error) {

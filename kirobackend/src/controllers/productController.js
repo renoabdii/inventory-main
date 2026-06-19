@@ -1,5 +1,44 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
+const Supplier = require('../models/Supplier');
+const StockMovement = require('../models/StockMovement');
+
+const getStockState = (stock, minStock) => {
+  if (stock <= 0) return 'OUT_OF_STOCK';
+  if (stock <= minStock * 0.25) return 'CRITICAL';
+  if (stock <= minStock) return 'LOW';
+  return 'NORMAL';
+};
+
+const createProductStockMovement = async ({
+  product,
+  userId,
+  stockBefore,
+  stockAfter,
+  referenceModel,
+  note,
+  createdBy,
+}) => {
+  if (stockBefore === stockAfter) return;
+
+  await StockMovement.create({
+    userId,
+    product: product._id,
+    productName: product.name,
+    sku: product.sku,
+    type: stockAfter > stockBefore ? 'IN' : 'OUT',
+    qty: Math.abs(stockAfter - stockBefore),
+    stockBefore,
+    stockAfter,
+    previousState: getStockState(stockBefore, product.minStock),
+    newState: getStockState(stockAfter, product.minStock),
+    reference: product.sku,
+    referenceModel,
+    referenceId: product._id,
+    note,
+    createdBy,
+  });
+};
 
 // Helper: Get userId untuk filter (admin = own, kasir = admin's)
 const getOwnerUserId = (req) => {
@@ -13,7 +52,7 @@ const getOwnerUserId = (req) => {
 // Get semua produk (dengan filter & search & pagination)
 const getAll = async (req, res, next) => {
   try {
-    const { search, category, page = 1, limit = 10 } = req.query;
+    const { search, category, supplierId, page = 1, limit = 10 } = req.query;
     const userId = getOwnerUserId(req);
     const filter = { userId };
 
@@ -28,12 +67,17 @@ const getAll = async (req, res, next) => {
       filter.category = category;
     }
 
+    if (supplierId && supplierId !== 'all') {
+      filter.supplier = supplierId;
+    }
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
     const total = await Product.countDocuments(filter);
     const products = await Product.find(filter)
+      .populate('supplier', 'name supplierId')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
@@ -63,11 +107,43 @@ const getAll = async (req, res, next) => {
   }
 };
 
+// Ambil seluruh produk untuk export, tetap mengikuti kepemilikan dan filter admin.
+const getExportData = async (req, res, next) => {
+  try {
+    const { search, category, status } = req.query;
+    const userId = getOwnerUserId(req);
+    const filter = { userId };
+
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    if (category && category !== 'all') {
+      filter.category = category;
+    }
+
+    let products = await Product.find(filter)
+      .populate('supplier', 'name supplierId')
+      .sort({ name: 1 });
+
+    if (['normal', 'low', 'critical'].includes(status)) {
+      products = products.filter((product) => product.status === status);
+    }
+
+    res.json({ success: true, data: products, total: products.length });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get produk by ID
 const getById = async (req, res, next) => {
   try {
     const userId = getOwnerUserId(req);
-    const product = await Product.findOne({ _id: req.params.id, userId });
+    const product = await Product.findOne({ _id: req.params.id, userId }).populate('supplier', 'name supplierId');
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
@@ -87,7 +163,7 @@ const create = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Hanya admin yang bisa membuat produk' });
     }
 
-    const { name, sku, category, stock, minStock, price, barcode } = req.body;
+    const { name, sku, category, stock, minStock, price, barcode, supplier } = req.body;
 
     if (barcode) {
       const barcodeExists = await Product.findOne({ barcode });
@@ -102,7 +178,23 @@ const create = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Kategori tidak ditemukan atau tidak aktif' });
     }
 
-    const product = await Product.create({ name, sku, category, stock, minStock, price, barcode, userId: req.user.id });
+    if (supplier) {
+      const supplierExists = await Supplier.findOne({ _id: supplier, status: 'ACTIVE', userId: req.user.id });
+      if (!supplierExists) {
+        return res.status(400).json({ success: false, message: 'Supplier tidak ditemukan atau tidak aktif' });
+      }
+    }
+
+    const product = await Product.create({ name, sku, category, stock, minStock, price, barcode, supplier: supplier || null, userId: req.user.id });
+    await createProductStockMovement({
+      product,
+      userId: req.user.id,
+      stockBefore: 0,
+      stockAfter: product.stock,
+      referenceModel: 'InitialStock',
+      note: 'Stok awal produk',
+      createdBy: req.user._id,
+    });
     res.status(201).json({ success: true, data: product });
   } catch (error) {
     if (error.code === 11000) {
@@ -184,6 +276,30 @@ const importBulk = async (req, res, next) => {
 
     const created = await Product.insertMany(validItems, { ordered: true });
 
+    const initialMovements = created
+      .filter((product) => product.stock > 0)
+      .map((product) => ({
+        userId: req.user.id,
+        product: product._id,
+        productName: product.name,
+        sku: product.sku,
+        type: 'IN',
+        qty: product.stock,
+        stockBefore: 0,
+        stockAfter: product.stock,
+        previousState: getStockState(0, product.minStock),
+        newState: getStockState(product.stock, product.minStock),
+        reference: product.sku,
+        referenceModel: 'Import',
+        referenceId: product._id,
+        note: 'Stok awal dari import Excel/CSV',
+        createdBy: req.user._id,
+      }));
+
+    if (initialMovements.length > 0) {
+      await StockMovement.insertMany(initialMovements, { ordered: true });
+    }
+
     res.status(201).json({
       success: true,
       message: `${created.length} produk berhasil diimport`,
@@ -205,7 +321,7 @@ const update = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Hanya admin yang bisa mengubah produk' });
     }
 
-    const { name, sku, category, stock, minStock, price, barcode } = req.body;
+    const { name, sku, category, stock, minStock, price, barcode, supplier } = req.body;
 
     // Validasi kategori harus ada dan aktif (dan milik user yang sama)
     if (category) {
@@ -222,15 +338,38 @@ const update = async (req, res, next) => {
       }
     }
 
+    if (supplier) {
+      const supplierExists = await Supplier.findOne({ _id: supplier, status: 'ACTIVE', userId: req.user.id });
+      if (!supplierExists) {
+        return res.status(400).json({ success: false, message: 'Supplier tidak ditemukan atau tidak aktif' });
+      }
+    }
+
+    const existingProduct = await Product.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!existingProduct) {
+      return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
+    }
+
+    const stockBefore = existingProduct.stock;
     const product = await Product.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id },
-      { name, sku, category, stock, minStock, price, barcode },
+      { name, sku, category, stock, minStock, price, barcode, supplier: supplier || null },
       { new: true, runValidators: true }
-    );
+    ).populate('supplier', 'name supplierId');
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
     }
+
+    await createProductStockMovement({
+      product,
+      userId: req.user.id,
+      stockBefore,
+      stockAfter: product.stock,
+      referenceModel: 'Adjustment',
+      note: 'Penyesuaian stok dari Edit Produk',
+      createdBy: req.user._id,
+    });
 
     res.json({ success: true, data: product });
   } catch (error) {
@@ -249,11 +388,20 @@ const remove = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Hanya admin yang bisa menghapus produk' });
     }
 
-    const product = await Product.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    const product = await Product.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
     }
+
+    if (product.stock > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Stok produk harus 0 sebelum produk dihapus. Sesuaikan stok terlebih dahulu agar pergerakannya tercatat.',
+      });
+    }
+
+    await Product.deleteOne({ _id: product._id, userId: req.user.id });
 
     res.json({ success: true, message: 'Barang berhasil dihapus' });
   } catch (error) {
@@ -286,4 +434,14 @@ const getLowStock = async (req, res, next) => {
   }
 };
 
-module.exports = { getAll, getById, create, importBulk, update, remove, getCategories, getLowStock };
+module.exports = {
+  getAll,
+  getExportData,
+  getById,
+  create,
+  importBulk,
+  update,
+  remove,
+  getCategories,
+  getLowStock,
+};

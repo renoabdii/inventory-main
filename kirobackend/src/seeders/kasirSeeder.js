@@ -7,8 +7,18 @@ const seedKasir = async () => {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB');
 
+    const admin = await User.findOne({ role: 'admin' });
+    if (!admin) {
+      throw new Error('Admin belum tersedia. Jalankan seed:admin terlebih dahulu.');
+    }
+
     const existingKasir = await User.findOne({ username: 'kasir1' });
     if (existingKasir) {
+      if (!existingKasir.adminId) {
+        existingKasir.adminId = admin._id;
+        await existingKasir.save();
+        console.log(`Kasir lama dihubungkan ke admin ${admin.username}.`);
+      }
       console.log('Kasir sudah ada, skip seeding.');
       process.exit(0);
     }
@@ -17,6 +27,7 @@ const seedKasir = async () => {
       username: 'kasir1',
       password: 'kasir123',
       role: 'kasir',
+      adminId: admin._id,
     });
 
     console.log('Kasir berhasil dibuat!');

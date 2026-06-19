@@ -1,5 +1,6 @@
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { validatePassword } = require('../utils/passwordPolicy');
+const { signUserToken } = require('../utils/token');
 
 const register = async (req, res, next) => {
   try {
@@ -24,6 +25,11 @@ const register = async (req, res, next) => {
       }
     }
 
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.valid) {
+      return res.status(400).json({ success: false, message: passwordCheck.message });
+    }
+
     // Buat user baru
     const user = new User({
       name,
@@ -39,11 +45,7 @@ const register = async (req, res, next) => {
     await user.save();
 
     // Generate JWT token
-    const token = jwt.sign(
-      { id: user._id, username: user.username, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+    const token = signUserToken(user);
 
     res.status(201).json({
       success: true,
@@ -89,11 +91,7 @@ const login = async (req, res, next) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign(
-      { id: user._id, username: user.username, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+    const token = signUserToken(user);
 
     res.json({
       success: true,
@@ -129,6 +127,11 @@ const createCashier = async (req, res, next) => {
     // Validasi input
     if (!name || !username || !password) {
       return res.status(400).json({ success: false, message: 'Nama, username, dan password wajib diisi' });
+    }
+
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.valid) {
+      return res.status(400).json({ success: false, message: passwordCheck.message });
     }
 
     // Cek username sudah ada

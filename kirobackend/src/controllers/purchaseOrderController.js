@@ -115,6 +115,12 @@ const create = async (req, res, next) => {
           message: `Produk dengan ID ${item.product} tidak ditemukan`,
         });
       }
+      if (product.supplier && product.supplier.toString() !== supplierId) {
+        return res.status(400).json({
+          success: false,
+          message: `Produk ${product.name} tidak berasal dari supplier yang dipilih`,
+        });
+      }
       const itemPrice = item.price || product.price;
       itemsWithDetails.push({
         product: item.product,
@@ -155,7 +161,7 @@ const create = async (req, res, next) => {
 const updateStatus = async (req, res, next) => {
   try {
     const { event, note } = req.body;
-    const order = await PurchaseOrder.findById(req.params.id).populate('supplier', 'name');
+    const order = await PurchaseOrder.findOne({ _id: req.params.id, userId: req.user.id }).populate('supplier', 'name');
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Purchase Order tidak ditemukan' });
@@ -181,6 +187,7 @@ const updateStatus = async (req, res, next) => {
       const receiptId = `RCV-${order.poNumber}`;
 
       await IncomingItem.create({
+        userId: req.user.id,
         receiptId,
         date: new Date(),
         supplier: order.supplier.name,
@@ -200,7 +207,7 @@ const updateStatus = async (req, res, next) => {
 
       // Update stock produk & catat stock movement
       for (const item of order.items) {
-        const product = await Product.findById(item.product);
+        const product = await Product.findOne({ _id: item.product, userId: req.user.id });
         if (!product) continue;
 
         const stockBefore = product.stock;
@@ -212,6 +219,7 @@ const updateStatus = async (req, res, next) => {
         const newState = getStockState(product.stock, product.minStock);
 
         await StockMovement.create({
+          userId: req.user.id,
           product: product._id,
           productName: product.name,
           sku: product.sku,
@@ -222,7 +230,7 @@ const updateStatus = async (req, res, next) => {
           previousState,
           newState,
           reference: order.poNumber,
-          referenceModel: 'IncomingItem',
+          referenceModel: 'PurchaseOrder',
           referenceId: order._id,
           note: `Purchase Order ${order.poNumber} dari ${order.supplier.name}`,
           createdBy: req.user._id,
@@ -252,7 +260,7 @@ const updateStatus = async (req, res, next) => {
 // Hapus PO (hanya jika PENDING)
 const remove = async (req, res, next) => {
   try {
-    const order = await PurchaseOrder.findById(req.params.id);
+    const order = await PurchaseOrder.findOne({ _id: req.params.id, userId: req.user.id });
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Purchase Order tidak ditemukan' });
@@ -265,7 +273,7 @@ const remove = async (req, res, next) => {
       });
     }
 
-    await PurchaseOrder.findByIdAndDelete(req.params.id);
+    await PurchaseOrder.deleteOne({ _id: req.params.id, userId: req.user.id });
     res.json({ success: true, message: 'Purchase Order berhasil dihapus' });
   } catch (error) {
     next(error);

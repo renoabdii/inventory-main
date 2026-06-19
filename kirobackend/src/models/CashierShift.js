@@ -90,5 +90,8 @@ cashierShiftSchema.index(
   { cashier: 1, status: 1 },
   { unique: true, partialFilterExpression: { status: 'open' } }
 );
+cashierShiftSchema.index({ userId: 1, openedAt: -1 });
+cashierShiftSchema.index({ userId: 1, status: 1, openedAt: -1 });
+cashierShiftSchema.index({ cashier: 1, openedAt: -1 });
 
 module.exports = mongoose.model('CashierShift', cashierShiftSchema, 'cashier_shifts');

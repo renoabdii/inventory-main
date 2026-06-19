@@ -1,6 +1,6 @@
-require('dotenv').config();
 const express = require('express');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const cors = require('cors');
 const connectDB = require('./config/database');
 const routes = require('./routes');
@@ -8,6 +8,10 @@ const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
 // Connect to MongoDB
 connectDB();

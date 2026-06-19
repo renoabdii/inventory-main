@@ -25,7 +25,11 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Password is required'],
-      minlength: 6,
+      minlength: 8,
+      validate: {
+        validator: (value) => /[A-Za-z]/.test(value) && /\d/.test(value),
+        message: 'Password harus mengandung huruf dan angka',
+      },
     },
     role: {
       type: String,
@@ -40,6 +44,11 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {
@@ -58,5 +67,8 @@ userSchema.pre('save', async function (next) {
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
+
+userSchema.index({ adminId: 1, role: 1, createdAt: -1 });
+userSchema.index({ role: 1, createdAt: -1 });
 
 module.exports = mongoose.model('User', userSchema, 'user');

@@ -121,7 +121,7 @@ const createOut = async (req, res, next) => {
       stockAfter: product.stock,
       previousState,
       newState,
-      referenceModel: 'Manual',
+      referenceModel: 'Adjustment',
       note: note || 'Barang keluar manual',
       createdBy: req.user._id,
     });
@@ -166,7 +166,7 @@ const createIn = async (req, res, next) => {
       stockAfter: product.stock,
       previousState,
       newState,
-      referenceModel: 'Manual',
+      referenceModel: 'Adjustment',
       note: note || 'Barang masuk manual',
       createdBy: req.user._id,
     });

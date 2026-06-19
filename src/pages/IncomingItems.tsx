@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,7 +125,9 @@ const getStatusBadge = (status: string) => {
 const IncomingItems = () => {
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [incomingData, setIncomingData] = useState<IncomingItemData[]>([]);
@@ -153,13 +157,14 @@ const IncomingItems = () => {
   /* =========================
      FETCH INCOMING ITEMS
   ========================= */
-  const fetchIncomingItems = async () => {
+  const fetchIncomingItems = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       if (statusFilter !== "all") params.append("status", statusFilter);
+      if (sourceFilter !== "all") params.append("source", sourceFilter);
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
@@ -180,9 +185,9 @@ const IncomingItems = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, sourceFilter, statusFilter, token]);
 
-  const fetchSuppliers = async () => {
+  const fetchSuppliers = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/suppliers`, {
@@ -195,12 +200,12 @@ const IncomingItems = () => {
     } catch (error) {
       console.error("Error fetching suppliers:", error);
     }
-  };
+  }, [token]);
 
   /* =========================
      FETCH PRODUCTS (for dropdown)
   ========================= */
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/products`, {
@@ -213,7 +218,7 @@ const IncomingItems = () => {
     } catch (error) {
       console.error("Error fetching products:", error);
     }
-  };
+  }, [token]);
 
   /* =========================
      USEEFFECT
@@ -221,11 +226,11 @@ const IncomingItems = () => {
   useEffect(() => {
     fetchProducts();
     fetchSuppliers();
-  }, [token]);
+  }, [fetchProducts, fetchSuppliers]);
 
   useEffect(() => {
     fetchIncomingItems();
-  }, [searchQuery, statusFilter, currentPage, token]);
+  }, [fetchIncomingItems]);
 
   /* =========================
      FORM HANDLERS
@@ -446,7 +451,9 @@ const IncomingItems = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <CardTitle className="text-lg">Riwayat Penerimaan</CardTitle>
-                <CardDescription>Daftar penerimaan barang dari supplier</CardDescription>
+                <CardDescription>
+                  Penerimaan manual dicatat di sini, sedangkan PO yang completed masuk otomatis sebagai sumber PO.
+                </CardDescription>
               </div>
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
@@ -573,7 +580,10 @@ const IncomingItems = () => {
                 <Input
                   placeholder="Cari ID atau supplier..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="pl-9"
                 />
               </div>
@@ -588,6 +598,16 @@ const IncomingItems = () => {
                   <SelectItem value="in_progress">Pengecekan</SelectItem>
                   <SelectItem value="cancelled">Dibatalkan</SelectItem>
                   <SelectItem value="rejected">Ditolak</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={sourceFilter} onValueChange={(value) => { setSourceFilter(value); setCurrentPage(1); }}>
+                <SelectTrigger className="w-full sm:w-40">
+                  <SelectValue placeholder="Sumber" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Sumber</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="purchase_order">Purchase Order</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -609,11 +629,7 @@ const IncomingItems = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
-                        Memuat data...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={8} />
                   ) : incomingData.length > 0 ? (
                     incomingData.map((item) => (
                       <TableRow key={item._id} className="border-border/50">
@@ -706,7 +722,10 @@ const IncomingItems = () => {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
-                        Tidak ada data penerimaan
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada penerimaan barang</p>
+                          <p className="text-sm">Tambahkan penerimaan manual atau selesaikan PO untuk mencatat barang masuk.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}

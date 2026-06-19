@@ -32,9 +32,14 @@ const generateInvoice = () => {
 const create = async (req, res, next) => {
   try {
     const { items, paymentAmount, paymentMethod } = req.body;
+    const method = paymentMethod || 'cash';
 
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, message: 'Minimal 1 item harus diisi' });
+    }
+
+    if (!['cash', 'qris'].includes(method)) {
+      return res.status(400).json({ success: false, message: 'Metode pembayaran tidak valid' });
     }
 
     if (!paymentAmount) {
@@ -84,6 +89,10 @@ const create = async (req, res, next) => {
       status: 'open',
     });
 
+    if (!activeShift) {
+      return res.status(400).json({ success: false, message: 'Shift kasir belum dibuka' });
+    }
+
     // Create transaction
     const transaction = await Transaction.create({
       userId,
@@ -92,9 +101,9 @@ const create = async (req, res, next) => {
       totalAmount,
       paymentAmount,
       changeAmount,
-      paymentMethod: paymentMethod || 'cash',
+      paymentMethod: method,
       cashier: req.user._id,
-      shift: activeShift?._id || null,
+      shift: activeShift._id,
     });
 
     // Update stock & create stock movements
@@ -120,7 +129,8 @@ const create = async (req, res, next) => {
         previousState,
         newState,
         reference: transaction.invoiceNumber,
-        referenceModel: 'Manual',
+        referenceModel: 'Transaction',
+        referenceId: transaction._id,
         note: `Penjualan kasir - ${transaction.invoiceNumber}`,
         createdBy: req.user._id,
       });
@@ -139,11 +149,14 @@ const create = async (req, res, next) => {
 const getAll = async (req, res, next) => {
   try {
     const { search, page = 1, limit = 10 } = req.query;
+    const ownerUserId = getOwnerUserId(req);
     const filter = {};
 
     // Kasir hanya lihat transaksi sendiri, admin lihat semua
     if (req.user.role === 'kasir') {
       filter.cashier = req.user._id;
+    } else if (ownerUserId) {
+      filter.userId = ownerUserId;
     }
 
     if (search) {
@@ -176,7 +189,15 @@ const getAll = async (req, res, next) => {
 // Get transaction by ID
 const getById = async (req, res, next) => {
   try {
-    const transaction = await Transaction.findById(req.params.id)
+    const ownerUserId = getOwnerUserId(req);
+    const filter = { _id: req.params.id };
+    if (req.user.role === 'kasir') {
+      filter.cashier = req.user._id;
+    } else if (ownerUserId) {
+      filter.userId = ownerUserId;
+    }
+
+    const transaction = await Transaction.findOne(filter)
       .populate('cashier', 'username')
       .populate('items.product', 'name sku price');
 

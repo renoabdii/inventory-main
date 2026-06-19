@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { PageLoading } from "@/components/LoadingState";
 
 import { API_BASE_URL } from "@/lib/api";
 import { exportToCsv, exportToStyledXlsx } from "@/lib/export";
@@ -68,6 +69,20 @@ interface ReportData {
     totalIn: number;
     totalOut: number;
     total: number;
+    posStockOut: number;
+    adjustmentStockOut: number;
+    otherStockOut: number;
+    poStockIn: number;
+    incomingStockIn: number;
+    initialStockIn: number;
+    importStockIn: number;
+    adjustmentStockIn: number;
+    otherStockIn: number;
+  };
+  sales: {
+    totalSales: number;
+    totalTransactions: number;
+    averageTransaction: number;
   };
   criticalStock: {
     id: string;
@@ -105,6 +120,19 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toMonthInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+};
+
 /* =========================
    PAGE
 ========================= */
@@ -113,16 +141,24 @@ const Reports = () => {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("month");
+  const [selectedDate, setSelectedDate] = useState(() => toDateInputValue(new Date()));
+  const [selectedMonth, setSelectedMonth] = useState(() => toMonthInputValue(new Date()));
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const token = localStorage.getItem("token");
 
-  const fetchReport = async () => {
+  const fetchReport = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({ period });
+      if (period === "day") {
+        params.append("date", selectedDate);
+      }
+      if (period === "month") {
+        params.append("month", selectedMonth);
+      }
       if (period === "custom" && startDate && endDate) {
         params.append("startDate", startDate);
         params.append("endDate", endDate);
@@ -140,15 +176,15 @@ const Reports = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [endDate, period, selectedDate, selectedMonth, startDate, token]);
 
   useEffect(() => {
     fetchReport();
-  }, [period, startDate, endDate, token]);
+  }, [fetchReport]);
 
-  const handleExportReport = async () => {
-    if (!data) return;
-    const rows = [
+  const buildReportExportRows = () => {
+    if (!data) return null;
+    return [
       { Bagian: "Ringkasan", Keterangan: "Total Produk", Jumlah: data.summary.totalProducts, Nominal: "" },
       { Bagian: "Ringkasan", Keterangan: "Stock Kritis", Jumlah: data.summary.criticalCount, Nominal: "" },
       { Bagian: "Ringkasan", Keterangan: "Stock Rendah", Jumlah: data.summary.lowCount, Nominal: "" },
@@ -158,6 +194,18 @@ const Reports = () => {
       { Bagian: "Pergerakan Stok", Keterangan: "Stock In", Jumlah: data.stockMovement.totalIn, Nominal: "" },
       { Bagian: "Pergerakan Stok", Keterangan: "Stock Out", Jumlah: data.stockMovement.totalOut, Nominal: "" },
       { Bagian: "Pergerakan Stok", Keterangan: "Total Movement", Jumlah: data.stockMovement.total, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In dari PO", Jumlah: data.stockMovement.poStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In Barang Masuk", Jumlah: data.stockMovement.incomingStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Awal Produk", Jumlah: data.stockMovement.initialStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In Import Excel/CSV", Jumlah: data.stockMovement.importStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In Penyesuaian", Jumlah: data.stockMovement.adjustmentStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock In Lainnya", Jumlah: data.stockMovement.otherStockIn, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out POS", Jumlah: data.stockMovement.posStockOut, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out Penyesuaian", Jumlah: data.stockMovement.adjustmentStockOut, Nominal: "" },
+      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out Lainnya", Jumlah: data.stockMovement.otherStockOut, Nominal: "" },
+      { Bagian: "Penjualan", Keterangan: "Total Transaksi", Jumlah: data.sales.totalTransactions, Nominal: "" },
+      { Bagian: "Penjualan", Keterangan: "Total Penjualan", Jumlah: "", Nominal: data.sales.totalSales },
+      { Bagian: "Penjualan", Keterangan: "Rata-rata Transaksi", Jumlah: "", Nominal: data.sales.averageTransaction },
       ...data.paymentSummary.map((item) => ({
         Bagian: "Metode Pembayaran",
         Keterangan: item.method.toUpperCase(),
@@ -165,37 +213,24 @@ const Reports = () => {
         Nominal: item.total,
       })),
     ];
+  };
 
+  const handleExportReport = async () => {
+    const rows = buildReportExportRows();
+    if (!rows) return;
     await exportToStyledXlsx("report-ely-berkah-mart.xlsx", "Laporan Ringkasan Inventory", rows);
   };
 
   const handleExportReportCsv = () => {
-    if (!data) return;
-    exportToCsv("report-ely-berkah-mart.csv", [
-      { Bagian: "Ringkasan", Keterangan: "Total Produk", Jumlah: data.summary.totalProducts, Nominal: "" },
-      { Bagian: "Ringkasan", Keterangan: "Stock Kritis", Jumlah: data.summary.criticalCount, Nominal: "" },
-      { Bagian: "Ringkasan", Keterangan: "Stock Rendah", Jumlah: data.summary.lowCount, Nominal: "" },
-      { Bagian: "Ringkasan", Keterangan: "Total Nilai Inventory", Jumlah: "", Nominal: data.summary.totalValue },
-      { Bagian: "Ringkasan", Keterangan: "Supplier Aktif", Jumlah: data.summary.activeSuppliers, Nominal: "" },
-      { Bagian: "Ringkasan", Keterangan: "Total Purchase Order", Jumlah: data.summary.totalPO, Nominal: "" },
-      { Bagian: "Pergerakan Stok", Keterangan: "Stock In", Jumlah: data.stockMovement.totalIn, Nominal: "" },
-      { Bagian: "Pergerakan Stok", Keterangan: "Stock Out", Jumlah: data.stockMovement.totalOut, Nominal: "" },
-      { Bagian: "Pergerakan Stok", Keterangan: "Total Movement", Jumlah: data.stockMovement.total, Nominal: "" },
-      ...data.paymentSummary.map((item) => ({
-        Bagian: "Metode Pembayaran",
-        Keterangan: item.method.toUpperCase(),
-        Jumlah: item.count,
-        Nominal: item.total,
-      })),
-    ]);
+    const rows = buildReportExportRows();
+    if (!rows) return;
+    exportToCsv("report-ely-berkah-mart.csv", rows);
   };
 
   if (loading || !data) {
     return (
       <DashboardLayout title="Reports">
-        <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Memuat data laporan...</p>
-        </div>
+        <PageLoading message="Memuat data laporan..." />
       </DashboardLayout>
     );
   }
@@ -215,12 +250,29 @@ const Reports = () => {
                 <SelectValue placeholder="Periode" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="week">Minggu Ini</SelectItem>
-                <SelectItem value="month">Bulan Ini</SelectItem>
-                <SelectItem value="custom">Tanggal Custom</SelectItem>
+                <SelectItem value="day">Harian</SelectItem>
+                <SelectItem value="week">Mingguan</SelectItem>
+                <SelectItem value="month">Bulanan</SelectItem>
+                <SelectItem value="custom">Rentang Tanggal</SelectItem>
                 <SelectItem value="all">Semua Waktu</SelectItem>
               </SelectContent>
             </Select>
+            {period === "day" && (
+              <Input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="w-full sm:w-44"
+              />
+            )}
+            {period === "month" && (
+              <Input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full sm:w-44"
+              />
+            )}
             {period === "custom" && (
               <>
                 <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -316,6 +368,27 @@ const Reports = () => {
           </Card>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">Total Penjualan Periode Ini</p>
+              <h2 className="text-2xl font-bold mt-1">{formatCurrency(data.sales.totalSales)}</h2>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">Total Transaksi POS</p>
+              <h2 className="text-2xl font-bold mt-1">{data.sales.totalTransactions}</h2>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-muted-foreground">Rata-rata Transaksi</p>
+              <h2 className="text-2xl font-bold mt-1">{formatCurrency(data.sales.averageTransaction)}</h2>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* GRID */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* TOP PRODUCTS */}
@@ -391,7 +464,7 @@ const Reports = () => {
                 ))
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-8">
-                  Tidak ada produk kritis 🎉
+                  Tidak ada produk kritis.
                 </p>
               )}
             </CardContent>
@@ -440,6 +513,37 @@ const Reports = () => {
                     <p className="text-sm text-muted-foreground">Total aktivitas</p>
                   </div>
                   <h2 className="text-2xl font-bold">{data.stockMovement.total}</h2>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Masuk dari PO</p>
+                  <p className="text-lg font-bold text-emerald-500">{data.stockMovement.poStockIn}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Barang Masuk</p>
+                  <p className="text-lg font-bold text-emerald-500">{data.stockMovement.incomingStockIn}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Stok Awal</p>
+                  <p className="text-lg font-bold text-emerald-500">{data.stockMovement.initialStockIn}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Import Excel/CSV</p>
+                  <p className="text-lg font-bold text-emerald-500">{data.stockMovement.importStockIn}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Masuk Penyesuaian</p>
+                  <p className="text-lg font-bold text-emerald-500">{data.stockMovement.adjustmentStockIn}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Keluar POS</p>
+                  <p className="text-lg font-bold text-red-500">{data.stockMovement.posStockOut}</p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Keluar Penyesuaian</p>
+                  <p className="text-lg font-bold text-red-500">{data.stockMovement.adjustmentStockOut}</p>
                 </div>
               </div>
             </CardContent>

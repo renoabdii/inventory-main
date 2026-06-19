@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 
 import { API_BASE_URL } from "@/lib/api";
 
@@ -74,6 +76,14 @@ interface MovementData {
   previousState: string;
   newState: string;
   reference?: string;
+  referenceModel?:
+    | "IncomingItem"
+    | "PurchaseOrder"
+    | "Transaction"
+    | "InitialStock"
+    | "Import"
+    | "Adjustment"
+    | "Manual";
   note?: string;
   createdAt: string;
 }
@@ -152,6 +162,70 @@ const getMovementBadge = (type: string) => {
   }
 };
 
+const getSourceBadge = (item: MovementData) => {
+  const note = item.note?.toLowerCase() || "";
+  const isLegacyPosMovement =
+    item.type === "OUT" &&
+    (note.includes("penjualan kasir") || note.includes("penjualan qris"));
+
+  if (item.referenceModel === "Transaction" || isLegacyPosMovement) {
+    return (
+      <Badge className="bg-blue-500/10 text-blue-500 border-0">
+        POS Kasir
+      </Badge>
+    );
+  }
+
+  if (
+    item.referenceModel === "PurchaseOrder" ||
+    (item.referenceModel === "IncomingItem" && note.includes("purchase order"))
+  ) {
+    return (
+      <Badge className="bg-primary/10 text-primary border-0">
+        Purchase Order
+      </Badge>
+    );
+  }
+
+  if (item.referenceModel === "IncomingItem") {
+    return (
+      <Badge className="bg-emerald-500/10 text-emerald-500 border-0">
+        Barang Masuk
+      </Badge>
+    );
+  }
+
+  if (item.referenceModel === "InitialStock") {
+    return (
+      <Badge className="bg-cyan-500/10 text-cyan-600 border-0">
+        Stok Awal
+      </Badge>
+    );
+  }
+
+  if (item.referenceModel === "Import") {
+    return (
+      <Badge className="bg-violet-500/10 text-violet-500 border-0">
+        Import Excel/CSV
+      </Badge>
+    );
+  }
+
+  if (item.referenceModel === "Adjustment") {
+    return (
+      <Badge className="bg-orange-500/10 text-orange-500 border-0">
+        Penyesuaian Manual
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge className="bg-slate-500/10 text-slate-500 border-0">
+      Manual
+    </Badge>
+  );
+};
+
 /* =========================
    PAGE
 ========================= */
@@ -159,6 +233,7 @@ const getMovementBadge = (type: string) => {
 const StockMovement = () => {
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [filterType, setFilterType] = useState("all");
   const [movementData, setMovementData] = useState<MovementData[]>([]);
   const [stats, setStats] = useState<MovementStats>({ total: 0, stockIn: 0, stockOut: 0, statusChanges: 0 });
@@ -184,12 +259,12 @@ const StockMovement = () => {
   /* =========================
      FETCH MOVEMENTS
   ========================= */
-  const fetchMovements = async () => {
+  const fetchMovements = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       if (filterType !== "all") params.append("type", filterType);
       params.append("page", String(currentPage));
       params.append("limit", "5");
@@ -211,12 +286,12 @@ const StockMovement = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, filterType, token]);
 
   /* =========================
      FETCH PRODUCTS
   ========================= */
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/products`, {
@@ -229,18 +304,18 @@ const StockMovement = () => {
     } catch (error) {
       console.error("Error fetching products:", error);
     }
-  };
+  }, [token]);
 
   /* =========================
      USEEFFECT
   ========================= */
   useEffect(() => {
     fetchProducts();
-  }, [token]);
+  }, [fetchProducts]);
 
   useEffect(() => {
     fetchMovements();
-  }, [searchQuery, filterType, currentPage, token]);
+  }, [fetchMovements]);
 
   /* =========================
      HANDLE STOCK OUT
@@ -387,9 +462,9 @@ const StockMovement = () => {
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>
-                    <DialogTitle>Catat Barang Keluar</DialogTitle>
+                    <DialogTitle>Catat Barang Keluar Manual</DialogTitle>
                     <DialogDescription>
-                      Kurangi stok produk secara manual
+                      Gunakan untuk penyesuaian stok, barang rusak, retur, atau kehilangan. Penjualan kasir tercatat otomatis dari POS.
                     </DialogDescription>
                   </DialogHeader>
 
@@ -426,7 +501,7 @@ const StockMovement = () => {
                     <div className="space-y-2">
                       <Label>Catatan (opsional)</Label>
                       <Input
-                        placeholder="Contoh: Penjualan harian"
+                        placeholder="Contoh: barang rusak atau penyesuaian opname"
                         value={outForm.note}
                         onChange={(e) => setOutForm((prev) => ({ ...prev, note: e.target.value }))}
                       />
@@ -453,7 +528,10 @@ const StockMovement = () => {
                   placeholder="Cari produk atau SKU..."
                   className="pl-10"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
                 />
               </div>
 
@@ -476,6 +554,7 @@ const StockMovement = () => {
                   <TableRow className="bg-muted/50">
                     <TableHead>Produk</TableHead>
                     <TableHead>Aktivitas</TableHead>
+                    <TableHead>Sumber</TableHead>
                     <TableHead className="text-right">Jumlah</TableHead>
                     <TableHead>Perubahan Status</TableHead>
                     <TableHead>Detail Stok</TableHead>
@@ -485,11 +564,7 @@ const StockMovement = () => {
 
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                        Memuat data...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={7} />
                   ) : movementData.length > 0 ? (
                     movementData.map((item) => (
                       <TableRow key={item._id}>
@@ -508,6 +583,17 @@ const StockMovement = () => {
 
                         {/* Movement */}
                         <TableCell>{getMovementBadge(item.type)}</TableCell>
+
+                        <TableCell>
+                          <div className="space-y-1">
+                            {getSourceBadge(item)}
+                            {(item.reference || item.note) && (
+                              <p className="text-xs text-muted-foreground">
+                                {item.reference || item.note}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
 
                         {/* Qty */}
                         <TableCell
@@ -551,8 +637,11 @@ const StockMovement = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                        Tidak ada data aktivitas
+                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada pergerakan stok</p>
+                          <p className="text-sm">Transaksi POS, barang masuk, atau penyesuaian manual akan muncul di sini.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}

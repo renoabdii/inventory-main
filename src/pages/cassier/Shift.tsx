@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import CashierLayout from "@/components/layout/CashierLayout";
 import TablePagination from "@/components/TablePagination";
+import { TableLoadingRows } from "@/components/LoadingState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Banknote, Clock, LockKeyhole, Play, ReceiptText, WalletCards } from "lucide-react";
+import { Banknote, Clock, Loader2, LockKeyhole, Play, ReceiptText, WalletCards } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 
 const formatCurrency = (value: number) =>
@@ -18,6 +19,10 @@ const formatCurrency = (value: number) =>
     currency: "IDR",
     minimumFractionDigits: 0,
   }).format(value || 0);
+
+const parseCurrencyInput = (value: string) => value.replace(/[^\d]/g, "");
+
+const QUICK_OPENING_CASH = [0, 100000, 200000, 500000];
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -68,14 +73,14 @@ const CashierShiftPage = () => {
     [token]
   );
 
-  const fetchActiveShift = async () => {
+  const fetchActiveShift = useCallback(async () => {
     if (!token) return;
     const res = await fetch(`${API_BASE_URL}/api/cashier-shifts/active`, { headers });
     const json = await res.json();
     if (json.success) setActiveShift(json.data);
-  };
+  }, [headers, token]);
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     if (!token) return;
     const res = await fetch(`${API_BASE_URL}/api/cashier-shifts?page=${currentPage}&limit=8`, {
       headers,
@@ -86,9 +91,9 @@ const CashierShiftPage = () => {
       setTotalPages(json.pagination?.totalPages || 1);
       setTotalItems(json.pagination?.total || 0);
     }
-  };
+  }, [currentPage, headers, token]);
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     setLoading(true);
     try {
       await Promise.all([fetchActiveShift(), fetchHistory()]);
@@ -97,11 +102,11 @@ const CashierShiftPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchActiveShift, fetchHistory]);
 
   useEffect(() => {
     refreshData();
-  }, [token, currentPage]);
+  }, [refreshData]);
 
   const handleOpenShift = async () => {
     if (!token) return;
@@ -173,6 +178,25 @@ const CashierShiftPage = () => {
 
   const expectedCash = activeShift?.expectedCash || 0;
   const closingDifference = closingCash ? Number(closingCash) - expectedCash : 0;
+  const closingCashQuickAmounts = useMemo(() => {
+    if (!activeShift) return [];
+
+    const amounts = [
+      expectedCash,
+      activeShift.openingCash,
+      activeShift.openingCash + activeShift.cashSales,
+    ];
+
+    return [...new Set(amounts)].filter((amount) => amount >= 0);
+  }, [activeShift, expectedCash]);
+
+  const handleOpeningCashChange = (value: string) => {
+    setOpeningCash(parseCurrencyInput(value));
+  };
+
+  const handleClosingCashChange = (value: string) => {
+    setClosingCash(parseCurrencyInput(value));
+  };
 
   return (
     <CashierLayout title="Shift Kasir">
@@ -271,11 +295,55 @@ const CashierShiftPage = () => {
                         <Label htmlFor="closingCash">Kas akhir fisik</Label>
                         <Input
                           id="closingCash"
-                          type="number"
-                          value={closingCash}
-                          onChange={(event) => setClosingCash(event.target.value)}
-                          placeholder="Contoh: 500000"
+                          inputMode="numeric"
+                          value={closingCash ? formatCurrency(Number(closingCash)) : ""}
+                          onChange={(event) => handleClosingCashChange(event.target.value)}
+                          placeholder="Rp 0"
+                          className="h-11 font-semibold"
                         />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {closingCashQuickAmounts.map((amount) => (
+                            <Button
+                              key={amount}
+                              type="button"
+                              variant={Number(closingCash) === amount ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setClosingCash(String(amount))}
+                            >
+                              {amount === expectedCash ? "Sesuai Sistem" : formatCurrency(amount)}
+                            </Button>
+                          ))}
+                        </div>
+                        {closingCash && (
+                          <div
+                            className={`rounded-lg border px-3 py-2 text-sm ${
+                              closingDifference === 0
+                                ? "border-emerald-500/20 bg-emerald-500/5"
+                                : "border-amber-500/20 bg-amber-500/5"
+                            }`}
+                          >
+                            <div className="flex justify-between gap-3">
+                              <span className="text-muted-foreground">
+                                {closingDifference === 0
+                                  ? "Kas sesuai"
+                                  : closingDifference > 0
+                                    ? "Lebih"
+                                    : "Kurang"}
+                              </span>
+                              <span
+                                className={`font-bold ${
+                                  closingDifference === 0
+                                    ? "text-emerald-600"
+                                    : closingDifference > 0
+                                      ? "text-emerald-600"
+                                      : "text-red-500"
+                                }`}
+                              >
+                                {formatCurrency(Math.abs(closingDifference))}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="closeNote">Catatan</Label>
@@ -289,7 +357,7 @@ const CashierShiftPage = () => {
                     </div>
 
                     <Button onClick={handleCloseShift} disabled={loading} className="gap-2">
-                      <LockKeyhole className="w-4 h-4" />
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LockKeyhole className="w-4 h-4" />}
                       {loading ? "Menyimpan..." : "Tutup Shift"}
                     </Button>
                   </div>
@@ -301,11 +369,25 @@ const CashierShiftPage = () => {
                       <Label htmlFor="openingCash">Modal kas awal</Label>
                       <Input
                         id="openingCash"
-                        type="number"
-                        value={openingCash}
-                        onChange={(event) => setOpeningCash(event.target.value)}
-                        placeholder="Contoh: 200000"
+                        inputMode="numeric"
+                        value={openingCash ? formatCurrency(Number(openingCash)) : ""}
+                        onChange={(event) => handleOpeningCashChange(event.target.value)}
+                        placeholder="Rp 0"
+                        className="h-11 font-semibold"
                       />
+                      <div className="grid grid-cols-2 gap-2">
+                        {QUICK_OPENING_CASH.map((amount) => (
+                          <Button
+                            key={amount}
+                            type="button"
+                            variant={Number(openingCash || 0) === amount ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setOpeningCash(String(amount))}
+                          >
+                            {amount === 0 ? "Tanpa Modal" : formatCurrency(amount)}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="openNote">Catatan</Label>
@@ -320,7 +402,7 @@ const CashierShiftPage = () => {
                   </div>
 
                   <Button onClick={handleOpenShift} disabled={loading} className="gap-2">
-                    <Play className="w-4 h-4" />
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                     {loading ? "Menyimpan..." : "Buka Shift"}
                   </Button>
                 </div>
@@ -344,7 +426,7 @@ const CashierShiftPage = () => {
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-muted-foreground">Non-cash</p>
-                <p className="font-semibold">Debit dan QRIS dipisah dari uang tunai</p>
+                <p className="font-semibold">QRIS dipisah dari uang tunai</p>
               </div>
             </CardContent>
           </Card>
@@ -372,11 +454,7 @@ const CashierShiftPage = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="h-28 text-center text-muted-foreground">
-                        Memuat data shift...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={8} />
                   ) : history.length > 0 ? (
                     history.map((shift) => (
                       <TableRow key={shift._id}>

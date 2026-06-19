@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import CashierLayout from "@/components/layout/CashierLayout";
 import TablePagination from "@/components/TablePagination";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -34,6 +36,7 @@ const getStatusBadge = (status: string) => {
 const Stock = () => {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -41,12 +44,12 @@ const Stock = () => {
 
   const token = localStorage.getItem("token");
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       params.append("page", String(currentPage));
       params.append("limit", "10");
 
@@ -66,11 +69,11 @@ const Stock = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, token]);
 
   useEffect(() => {
     fetchProducts();
-  }, [searchQuery, currentPage, token]);
+  }, [fetchProducts]);
 
   return (
     <CashierLayout title="Cek Stok">
@@ -81,9 +84,18 @@ const Stock = () => {
               <Package className="w-5 h-5" />
               Cek Stok Produk
             </CardTitle>
-            <CardDescription>Lihat ketersediaan stok produk (read-only)</CardDescription>
+            <CardDescription>
+              Lihat ketersediaan stok produk. Kasir tidak mengubah stok dari halaman ini.
+            </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
+              <p className="font-medium text-blue-700">Flow stok kasir</p>
+              <p className="text-muted-foreground mt-1">
+                Gunakan halaman ini untuk mengecek stok sebelum transaksi. Jika stok menipis atau hampir habis, admin melakukan restock lewat Purchase Order atau Barang Masuk.
+              </p>
+            </div>
+
             <div className="relative mb-6">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -107,9 +119,7 @@ const Stock = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={5} />
                   ) : products.length > 0 ? (
                     products.map((p) => (
                       <TableRow key={p._id}>
@@ -129,7 +139,12 @@ const Stock = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">Tidak ada produk</TableCell>
+                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Tidak ada produk</p>
+                          <p className="text-sm">Hubungi admin untuk menambahkan produk atau coba kata kunci lain.</p>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>

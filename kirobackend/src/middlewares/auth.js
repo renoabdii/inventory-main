@@ -18,6 +18,10 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'User tidak valid' });
     }
 
+    if (!Number.isInteger(decoded.tv) || Number(decoded.tv) !== Number(user.tokenVersion || 0)) {
+      return res.status(401).json({ success: false, message: 'Sesi sudah tidak berlaku, silakan login kembali' });
+    }
+
     req.user = user;
     next();
   } catch (error) {

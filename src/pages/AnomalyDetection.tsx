@@ -226,9 +226,9 @@ const AnomalyDetection = () => {
                       name="Data Points"
                       data={scatterData}
                       fill="hsl(var(--primary))"
-                      shape={(props: any) => {
+                      shape={(props: { cx?: number; cy?: number; payload?: { status?: string } }) => {
                         const { cx, cy, payload } = props;
-                        const isAnomaly = payload.status === "anomaly";
+                        const isAnomaly = payload?.status === "anomaly";
                         return (
                           <circle
                             cx={cx}

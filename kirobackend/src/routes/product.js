@@ -9,6 +9,7 @@ router.use(authenticate);
 router.get('/', productController.getAll);
 router.get('/categories', productController.getCategories);
 router.get('/low-stock', productController.getLowStock);
+router.get('/export', productController.getExportData);
 router.post('/import', productController.importBulk);
 router.get('/:id', productController.getById);
 router.post('/', productController.create);

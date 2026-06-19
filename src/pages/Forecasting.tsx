@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 
 import { API_BASE_URL } from "@/lib/api";
@@ -13,6 +13,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableLoadingRows } from "@/components/LoadingState";
 
 import {
   Table,
@@ -57,7 +59,11 @@ interface ForecastStats {
   restock: number;
   critical: number;
   method: string;
+  lstmStatus?: "completed" | "insufficient_data" | "failed";
+  lstmError?: string | null;
 }
+
+type ForecastJobStatus = "idle" | "training" | "completed" | "failed";
 
 /* =========================
    STATUS BADGE
@@ -84,31 +90,97 @@ const Forecast = () => {
   const [forecastData, setForecastData] = useState<ForecastItem[]>([]);
   const [stats, setStats] = useState<ForecastStats>({ safe: 0, restock: 0, critical: 0, method: "" });
   const [loading, setLoading] = useState(false);
+  const [jobStatus, setJobStatus] = useState<ForecastJobStatus>("idle");
+  const [generating, setGenerating] = useState(false);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
 
   const token = localStorage.getItem("token");
 
-  const fetchForecast = async () => {
+  const fetchForecast = useCallback(async (showLoading = true) => {
     if (!token) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/forecast`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
-      if (json.success) {
-        setForecastData(json.data);
-        setStats(json.stats);
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Gagal mengambil data forecast");
       }
+      setForecastData(json.data);
+      setStats(json.stats);
+      setJobStatus(json.status || "idle");
+      setGeneratedAt(json.generatedAt || null);
+      setForecastError(json.error || null);
     } catch (error) {
       console.error("Error fetching forecast:", error);
+      setForecastError(error instanceof Error ? error.message : "Gagal mengambil data forecast");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  };
+  }, [token]);
+
+  const fetchForecastStatus = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/forecast/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Gagal memeriksa status forecast");
+      }
+
+      const nextStatus = (json.status || "idle") as ForecastJobStatus;
+      setJobStatus(nextStatus);
+      setGeneratedAt(json.generatedAt || null);
+      setForecastError(json.error || null);
+
+      if (nextStatus !== "training") {
+        await fetchForecast(false);
+      }
+    } catch (error) {
+      setForecastError(error instanceof Error ? error.message : "Gagal memeriksa status forecast");
+    }
+  }, [fetchForecast, token]);
 
   useEffect(() => {
     fetchForecast();
-  }, [token]);
+  }, [fetchForecast]);
+
+  useEffect(() => {
+    if (jobStatus !== "training") return;
+
+    const pollId = window.setInterval(() => {
+      fetchForecastStatus();
+    }, 3000);
+
+    return () => window.clearInterval(pollId);
+  }, [fetchForecastStatus, jobStatus]);
+
+  const generateForecast = async () => {
+    if (!token || jobStatus === "training") return;
+
+    setGenerating(true);
+    setForecastError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/forecast/generate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Gagal memulai training LSTM");
+      }
+      setJobStatus("training");
+    } catch (error) {
+      setForecastError(error instanceof Error ? error.message : "Gagal memulai training LSTM");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const criticalItems = forecastData.filter((i) => i.status === "CRITICAL");
   const restockItems = forecastData.filter((i) => i.status === "RESTOCK");
@@ -137,11 +209,20 @@ const Forecast = () => {
                     </span>
                     {" "}berdasarkan data historis pergerakan stok.
                   </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-muted-foreground">
+                    {jobStatus === "training" && <Badge variant="secondary">Training LSTM di background...</Badge>}
+                    {jobStatus === "failed" && <Badge variant="destructive">Training terakhir gagal</Badge>}
+                    {stats.lstmStatus === "insufficient_data" && jobStatus !== "training" && (
+                      <Badge variant="secondary">Data LSTM belum cukup, memakai Moving Average</Badge>
+                    )}
+                    {generatedAt && <span>Terakhir diperbarui: {new Date(generatedAt).toLocaleString("id-ID")}</span>}
+                  </div>
+                  {forecastError && <p className="text-sm text-red-500 mt-2">{forecastError}</p>}
                 </div>
               </div>
-              <Button className="gap-2" onClick={fetchForecast} disabled={loading}>
-                <RefreshCcw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-                {loading ? "Generating..." : "Generate Forecast"}
+              <Button className="gap-2" onClick={generateForecast} disabled={loading || generating || jobStatus === "training"}>
+                <RefreshCcw className={`w-4 h-4 ${generating || jobStatus === "training" ? "animate-spin" : ""}`} />
+                {jobStatus === "training" ? "Training LSTM..." : generating ? "Memulai..." : "Generate Forecast"}
               </Button>
             </div>
           </CardContent>
@@ -154,7 +235,7 @@ const Forecast = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Safe Products</p>
-                  <h2 className="text-3xl font-bold mt-1">{stats.safe}</h2>
+                  {loading ? <Skeleton className="mt-2 h-8 w-16" /> : <h2 className="text-3xl font-bold mt-1">{stats.safe}</h2>}
                   <p className="text-xs text-emerald-500 mt-2">Stock aman</p>
                 </div>
                 <div className="p-3 rounded-2xl bg-emerald-500/10">
@@ -169,7 +250,7 @@ const Forecast = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Need Restock</p>
-                  <h2 className="text-3xl font-bold mt-1">{stats.restock}</h2>
+                  {loading ? <Skeleton className="mt-2 h-8 w-16" /> : <h2 className="text-3xl font-bold mt-1">{stats.restock}</h2>}
                   <p className="text-xs text-yellow-500 mt-2">Segera restock</p>
                 </div>
                 <div className="p-3 rounded-2xl bg-yellow-500/10">
@@ -184,7 +265,7 @@ const Forecast = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Critical</p>
-                  <h2 className="text-3xl font-bold mt-1">{stats.critical}</h2>
+                  {loading ? <Skeleton className="mt-2 h-8 w-16" /> : <h2 className="text-3xl font-bold mt-1">{stats.critical}</h2>}
                   <p className="text-xs text-red-500 mt-2">Stock hampir habis</p>
                 </div>
                 <div className="p-3 rounded-2xl bg-red-500/10">
@@ -199,7 +280,7 @@ const Forecast = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Metode</p>
-                  <h2 className="text-lg font-bold mt-1 uppercase">{stats.method || "-"}</h2>
+                  {loading ? <Skeleton className="mt-2 h-6 w-24" /> : <h2 className="text-lg font-bold mt-1 uppercase">{stats.method || "-"}</h2>}
                   <p className="text-xs text-primary mt-2">
                     {stats.method === "lstm" ? "Deep Learning" : "Statistical"}
                   </p>
@@ -315,14 +396,7 @@ const Forecast = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                        <div className="flex items-center justify-center gap-2">
-                          <RefreshCcw className="w-4 h-4 animate-spin" />
-                          Generating prediction...
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={6} />
                   ) : forecastData.length > 0 ? (
                     forecastData.map((item) => (
                       <TableRow key={item.productId}>

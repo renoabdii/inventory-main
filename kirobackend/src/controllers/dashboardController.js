@@ -2,6 +2,7 @@ const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
 const PurchaseOrder = require('../models/PurchaseOrder');
 const IncomingItem = require('../models/IncomingItem');
+const Transaction = require('../models/Transaction');
 
 // Get dashboard summary
 const getSummary = async (req, res, next) => {
@@ -43,6 +44,21 @@ const getSummary = async (req, res, next) => {
     // === PURCHASE ORDER STATS ===
     const allPO = await PurchaseOrder.find({ userId: req.user.id });
     const pendingPO = allPO.filter((po) => po.status === 'PENDING').length;
+    const shippingPO = allPO.filter((po) => po.status === 'SHIPPING').length;
+
+    const pendingIncomingItems = await IncomingItem.find({
+      userId: req.user.id,
+      status: { $in: ['pending', 'in_progress'] },
+    })
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    const todayTransactions = await Transaction.find({
+      userId: req.user.id,
+      createdAt: { $gte: todayStart, $lte: today },
+    });
+
+    const todaySales = todayTransactions.reduce((acc, transaction) => acc + transaction.totalAmount, 0);
 
     // === RECENT ACTIVITIES (5 terbaru) ===
     const recentMovements = await StockMovement.find({ userId: req.user.id })
@@ -78,6 +94,10 @@ const getSummary = async (req, res, next) => {
           todayStockIn: todayStockInQty,
           totalPO: allPO.length,
           pendingPO,
+          shippingPO,
+          pendingIncoming: pendingIncomingItems.length,
+          todayTransactions: todayTransactions.length,
+          todaySales,
         },
         stockMovement: {
           weekIn: weekStockInQty,
@@ -85,6 +105,14 @@ const getSummary = async (req, res, next) => {
           weekTotal: weekStockInQty + weekStockOutQty,
         },
         criticalStock: criticalStockList,
+        pendingIncoming: pendingIncomingItems.map((item) => ({
+          id: item._id,
+          receiptId: item.receiptId,
+          supplier: item.supplier,
+          status: item.status,
+          totalItems: item.totalItems,
+          totalQty: item.totalQty,
+        })),
         recentActivities,
       },
     });
@@ -113,7 +141,7 @@ const getNotifications = async (req, res, next) => {
     const notifications = [];
 
     // 1. Produk dengan stock critical
-    const products = await Product.find();
+    const products = await Product.find({ userId: req.user.id });
     const criticalProducts = products.filter((p) => p.status === 'critical');
     criticalProducts.forEach((p) => {
       notifications.push({
@@ -144,7 +172,7 @@ const getNotifications = async (req, res, next) => {
     });
 
     // 3. Purchase Order pending
-    const pendingPO = await PurchaseOrder.find({ status: 'PENDING' })
+    const pendingPO = await PurchaseOrder.find({ userId: req.user.id, status: 'PENDING' })
       .populate('supplier', 'name')
       .sort({ createdAt: -1 })
       .limit(5);
@@ -163,6 +191,7 @@ const getNotifications = async (req, res, next) => {
 
     // 4. Incoming items pending
     const pendingIncoming = await IncomingItem.find({
+      userId: req.user.id,
       status: { $in: ['pending', 'in_progress'] },
     })
       .sort({ createdAt: -1 })

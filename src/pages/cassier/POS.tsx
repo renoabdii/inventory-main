@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import CashierLayout from "@/components/layout/CashierLayout";
@@ -6,10 +7,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Minus, Trash2, ShoppingBag, ScanBarcode } from "lucide-react";
+import {
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  ShoppingBag,
+  ScanBarcode,
+  Clock,
+  Loader2,
+  CheckCircle2,
+  RefreshCcw,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -25,6 +41,10 @@ import { API_BASE_URL } from "@/lib/api";
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(value);
+
+const parseCurrencyInput = (value: string) => value.replace(/[^\d]/g, "");
+
+const roundUpTo = (value: number, step: number) => Math.ceil(value / step) * step;
 
 interface ProductItem {
   _id: string;
@@ -61,7 +81,13 @@ interface ReceiptTransaction {
   createdAt: string;
 }
 
+interface ActiveShift {
+  _id: string;
+  openedAt: string;
+}
+
 const POS = () => {
+  const navigate = useNavigate();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -78,6 +104,9 @@ const POS = () => {
   const [qrisStatus, setQrisStatus] = useState<"pending" | "settlement" | "capture" | "expire" | "deny" | "cancel" | "failed">("pending");
   const [qrisTimeLeft, setQrisTimeLeft] = useState(900);
   const [qrisExpiresAt, setQrisExpiresAt] = useState<number | null>(null);
+  const [qrisDemoMode, setQrisDemoMode] = useState(false);
+  const [activeShift, setActiveShift] = useState<ActiveShift | null>(null);
+  const [shiftChecked, setShiftChecked] = useState(false);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
   const token = localStorage.getItem("token");
@@ -118,6 +147,20 @@ const POS = () => {
       .then((r) => r.json())
       .then((json) => { if (json.success) setProducts(json.data); })
       .catch(console.error);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    fetch(`${API_BASE_URL}/api/cashier-shifts/active`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setActiveShift(json.data);
+      })
+      .catch(console.error)
+      .finally(() => setShiftChecked(true));
   }, [token]);
 
   // Filter products
@@ -164,6 +207,20 @@ const POS = () => {
   const totalAmount = cart.reduce((acc, c) => acc + c.price * c.qty, 0);
   const paidAmount = paymentMethod === "cash" ? Number(paymentAmount) : totalAmount;
   const changeAmount = paidAmount - totalAmount;
+  const cashShortage = Math.max(totalAmount - paidAmount, 0);
+  const cashQuickAmounts = useMemo(() => {
+    if (totalAmount <= 0) return [];
+
+    const candidates = [
+      totalAmount,
+      roundUpTo(totalAmount, 5000),
+      roundUpTo(totalAmount, 10000),
+      roundUpTo(totalAmount, 50000),
+      roundUpTo(totalAmount, 100000),
+    ];
+
+    return [...new Set(candidates)].filter((amount) => amount > 0).slice(0, 4);
+  }, [totalAmount]);
 
   useEffect(() => {
     if (!isQrisOpen || qrisStatus !== "pending" || !qrisExpiresAt) return;
@@ -181,24 +238,24 @@ const POS = () => {
     return () => window.clearInterval(interval);
   }, [isQrisOpen, qrisExpiresAt, qrisStatus]);
 
-  const refreshProducts = async () => {
+  const refreshProducts = useCallback(async () => {
     if (!token) return;
     const prodRes = await fetch(`${API_BASE_URL}/api/products?limit=100`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const prodJson = await prodRes.json();
     if (prodJson.success) setProducts(prodJson.data);
-  };
+  }, [token]);
 
-  const handlePaidQris = async (transaction: ReceiptTransaction) => {
+  const handlePaidQris = useCallback(async (transaction: ReceiptTransaction) => {
     toast.success("Pembayaran QRIS berhasil");
     setLastTransaction(transaction);
     setIsQrisOpen(false);
     setIsReceiptOpen(true);
     await refreshProducts();
-  };
+  }, [refreshProducts]);
 
-  const checkQrisStatus = async (orderId = qrisOrderId, showFeedback = false) => {
+  const checkQrisStatus = useCallback(async (orderId = qrisOrderId, showFeedback = false) => {
     if (!token || !orderId) return;
 
     try {
@@ -234,9 +291,9 @@ const POS = () => {
     } catch (error) {
       toast.error("Gagal mengecek status QRIS");
     }
-  };
+  }, [handlePaidQris, qrisOrderId, token]);
 
-  const simulateQrisPaid = async () => {
+  const completeDemoQrisPayment = async () => {
     if (!token || !qrisOrderId) return;
 
     setLoading(true);
@@ -248,7 +305,7 @@ const POS = () => {
       const json = await res.json();
 
       if (!json.success) {
-        toast.error(json.message || "Gagal mensimulasikan pembayaran QRIS");
+        toast.error(json.message || "Gagal mengonfirmasi pembayaran demo");
         return;
       }
 
@@ -256,10 +313,10 @@ const POS = () => {
       if (json.data.transaction) {
         await handlePaidQris(json.data.transaction);
       } else {
-        toast.success("Pembayaran QRIS disimulasikan sukses");
+        toast.success("Pembayaran demo berhasil dikonfirmasi");
       }
     } catch (error) {
-      toast.error("Terjadi kesalahan saat simulasi QRIS");
+      toast.error("Terjadi kesalahan saat mengonfirmasi pembayaran demo");
     } finally {
       setLoading(false);
     }
@@ -273,7 +330,7 @@ const POS = () => {
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [isQrisOpen, qrisOrderId, qrisStatus]);
+  }, [checkQrisStatus, isQrisOpen, qrisOrderId, qrisStatus]);
 
   const prepareQris = async () => {
     if (!token) return;
@@ -297,6 +354,7 @@ const POS = () => {
       setQrisOrderId(json.data.orderId);
       setQrisQrUrl(json.data.qrCodeUrl);
       setQrisStatus(json.data.status || "pending");
+      setQrisDemoMode(Boolean(json.data.simulationEnabled));
       const expires = json.data.expiredAt ? new Date(json.data.expiredAt).getTime() : Date.now() + 15 * 60 * 1000;
       setQrisExpiresAt(expires);
       setQrisTimeLeft(Math.max(0, Math.ceil((expires - Date.now()) / 1000)));
@@ -339,6 +397,11 @@ const POS = () => {
 
   // Submit transaction
   const handleSubmit = async () => {
+    if (shiftChecked && !activeShift) {
+      toast.warning("Buka shift terlebih dahulu sebelum transaksi");
+      navigate("/kasir/shift");
+      return;
+    }
     if (cart.length === 0) { toast.warning("Keranjang masih kosong"); return; }
     if (paymentMethod === "cash" && (!paymentAmount || Number(paymentAmount) < totalAmount)) {
       toast.warning("Pembayaran kurang dari total belanja");
@@ -395,6 +458,10 @@ const POS = () => {
     }
   };
 
+  const handlePaymentAmountChange = (value: string) => {
+    setPaymentAmount(parseCurrencyInput(value));
+  };
+
   const handleNewTransaction = () => {
     setCart([]);
     setPaymentAmount("");
@@ -404,6 +471,7 @@ const POS = () => {
     setQrisOrderId("");
     setQrisQrUrl("");
     setQrisStatus("pending");
+    setQrisDemoMode(false);
     setTimeout(() => barcodeRef.current?.focus(), 0);
   };
 
@@ -486,7 +554,31 @@ const POS = () => {
 
   return (
     <CashierLayout title="POS - Point of Sale">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-8rem)]">
+      <div className="space-y-4">
+        {shiftChecked && !activeShift && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-lg bg-amber-500/10 p-2">
+                    <Clock className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Shift belum dibuka</p>
+                    <p className="text-sm text-muted-foreground">
+                      Kasir harus membuka shift sebelum memproses transaksi POS.
+                    </p>
+                  </div>
+                </div>
+                <Button onClick={() => navigate("/kasir/shift")}>
+                  Buka Shift
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-11rem)]">
         {/* LEFT: Product List */}
         <div className="lg:col-span-2 flex flex-col">
           {/* Barcode Scanner Input */}
@@ -601,18 +693,71 @@ const POS = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="debit">Debit</SelectItem>
                     <SelectItem value="qris">QRIS</SelectItem>
                   </SelectContent>
                 </Select>
 
                 {paymentMethod === "cash" ? (
-                  <Input
-                    type="number"
-                    placeholder="Jumlah bayar"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                  />
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">Uang diterima</label>
+                      <Input
+                        inputMode="numeric"
+                        placeholder="Rp 0"
+                        className="h-12 text-lg font-semibold"
+                        value={paymentAmount ? formatCurrency(Number(paymentAmount)) : ""}
+                        onChange={(e) => handlePaymentAmountChange(e.target.value)}
+                      />
+                    </div>
+
+                    {totalAmount > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {cashQuickAmounts.map((amount) => (
+                          <Button
+                            key={amount}
+                            type="button"
+                            variant={Number(paymentAmount) === amount ? "default" : "outline"}
+                            size="sm"
+                            className="justify-center"
+                            onClick={() => setPaymentAmount(String(amount))}
+                          >
+                            {amount === totalAmount ? "Uang Pas" : formatCurrency(amount)}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        paidAmount <= 0
+                          ? "bg-muted/40"
+                          : cashShortage > 0
+                          ? "border-red-500/20 bg-red-500/5"
+                          : "border-emerald-500/20 bg-emerald-500/5"
+                      }`}
+                    >
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">
+                          {paidAmount <= 0 ? "Status" : cashShortage > 0 ? "Kurang" : "Kembalian"}
+                        </span>
+                        <span
+                          className={`font-bold ${
+                            paidAmount <= 0
+                              ? ""
+                              : cashShortage > 0
+                              ? "text-red-500"
+                              : "text-emerald-500"
+                          }`}
+                        >
+                          {paidAmount <= 0
+                            ? "Masukkan uang diterima"
+                            : cashShortage > 0
+                            ? formatCurrency(cashShortage)
+                            : formatCurrency(changeAmount)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
                     <div className="flex justify-between">
@@ -622,35 +767,45 @@ const POS = () => {
                   </div>
                 )}
 
-                {paymentMethod === "cash" && Number(paymentAmount) > 0 && Number(paymentAmount) >= totalAmount && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Kembalian</span>
-                    <span className="font-bold text-emerald-500">{formatCurrency(changeAmount)}</span>
-                  </div>
-                )}
-
-                <Button className="w-full gap-2" size="lg" onClick={handleSubmit} disabled={loading || cart.length === 0}>
-                  <ShoppingBag className="w-4 h-4" />
-                  {loading ? "Memproses..." : "Bayar"}
+                <Button className="w-full gap-2" size="lg" onClick={handleSubmit} disabled={loading || cart.length === 0 || !activeShift}>
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingBag className="w-4 h-4" />}
+                  {loading ? "Memproses..." : activeShift ? "Bayar" : "Buka Shift Dulu"}
                 </Button>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+      </div>
 
       <Dialog open={isQrisOpen} onOpenChange={setIsQrisOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Pembayaran QRIS</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
+                <Smartphone className="h-4 w-4 text-primary" />
+              </span>
+              Scan QRIS untuk Membayar
+            </DialogTitle>
+            <DialogDescription>
+              Minta pelanggan memindai kode QR menggunakan aplikasi pembayaran pilihannya.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="rounded-lg border p-4 text-center">
-              <h2 className="text-lg font-bold">Ely Berkah Mart</h2>
-              <p className="text-sm text-muted-foreground">Invoice {qrisOrderId}</p>
+            <div className="rounded-2xl border bg-gradient-to-b from-background to-muted/30 p-4 text-center">
+              <div className="flex items-center justify-between gap-3 text-left">
+                <div>
+                  <h2 className="font-bold">Ely Berkah Mart</h2>
+                  <p className="font-mono text-xs text-muted-foreground">{qrisOrderId}</p>
+                </div>
+                <Badge variant="outline" className="gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  QRIS
+                </Badge>
+              </div>
 
-              <div className="mx-auto my-5 w-[260px] rounded-lg border bg-white p-3">
+              <div className="mx-auto my-4 w-full max-w-[230px] rounded-2xl border bg-white p-3 shadow-sm sm:max-w-[250px]">
                 {qrisQrUrl ? (
                   <img
                     src={qrisQrUrl}
@@ -658,62 +813,130 @@ const POS = () => {
                     className="h-auto w-full"
                   />
                 ) : (
-                  <div className="flex aspect-square items-center justify-center text-sm text-muted-foreground">
-                    Memuat QRIS...
+                  <div className="flex aspect-square items-center justify-center">
+                    <div className="w-full space-y-3">
+                      <Skeleton className="mx-auto h-40 w-40" />
+                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Menyiapkan kode pembayaran...
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="rounded-lg bg-muted/50 p-3">
-                <p className="text-sm text-muted-foreground">Total Pembayaran</p>
-                <p className="text-2xl font-bold text-primary">{formatCurrency(totalAmount)}</p>
+              <div className="rounded-xl bg-primary/5 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total pembayaran</p>
+                <p className="mt-1 text-3xl font-bold text-primary">{formatCurrency(totalAmount)}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mt-4 text-left text-sm">
-                <div>
-                  <p className="text-muted-foreground">Status</p>
-                  <p className="font-medium">
+              <div className="mt-4 rounded-xl border bg-background p-3 text-left" aria-live="polite">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    {qrisStatus === "pending" ? (
+                      <span className="relative flex h-3 w-3">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                        <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
+                      </span>
+                    ) : qrisStatus === "settlement" || qrisStatus === "capture" ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                    ) : (
+                      <Clock className="h-5 w-5 text-red-500" />
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {qrisStatus === "pending"
+                          ? "Menunggu pembayaran"
+                          : qrisStatus === "settlement" || qrisStatus === "capture"
+                          ? "Pembayaran berhasil"
+                          : qrisStatus === "expire"
+                          ? "Kode QR sudah kedaluwarsa"
+                          : qrisStatus === "failed"
+                          ? "Pembayaran gagal diproses"
+                          : "Pembayaran tidak berhasil"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {qrisStatus === "pending"
+                          ? "Status diperiksa otomatis"
+                          : "Silakan lanjutkan sesuai status pembayaran"}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="font-mono text-sm font-semibold">
                     {qrisStatus === "pending"
-                      ? "Menunggu pembayaran..."
-                      : qrisStatus === "settlement" || qrisStatus === "capture"
-                      ? "Pembayaran berhasil"
-                      : qrisStatus === "expire"
-                      ? "QRIS kadaluarsa"
-                      : qrisStatus === "failed"
-                      ? "Gagal diproses"
-                      : "Pembayaran tidak berhasil"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Kadaluarsa</p>
-                  <p className="font-medium">
-                    {Math.floor(qrisTimeLeft / 60)
-                      .toString()
-                      .padStart(2, "0")}:
-                    {(qrisTimeLeft % 60).toString().padStart(2, "0")}
+                      ? `${Math.floor(qrisTimeLeft / 60).toString().padStart(2, "0")}:${(qrisTimeLeft % 60)
+                          .toString()
+                          .padStart(2, "0")}`
+                      : ""}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
-              <p className="font-medium text-blue-700">QRIS Xendit</p>
-              <p className="text-muted-foreground mt-1">
-                Tampilkan QR ini ke pelanggan. Sistem akan mengecek status pembayaran otomatis, atau klik tombol cek status setelah pelanggan membayar.
-              </p>
+            <div className="rounded-xl border p-3 text-sm">
+              <div className="flex gap-3">
+                <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                <div>
+                  <p className="font-medium">Cara membayar</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Buka aplikasi pembayaran, pilih menu Scan QRIS, lalu arahkan kamera ke kode di atas.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" onClick={() => setIsQrisOpen(false)} disabled={loading}>
-                Batal
+                {qrisStatus === "pending" ? "Batalkan" : "Tutup"}
               </Button>
-              <Button variant="secondary" onClick={simulateQrisPaid} disabled={loading || qrisStatus === "expire"}>
-                Simulasi Paid
-              </Button>
-              <Button onClick={handleConfirmQrisPaid} disabled={loading || qrisStatus === "expire"}>
-                {loading ? "Memproses..." : "Cek Status"}
-              </Button>
+              {qrisStatus === "expire" || qrisStatus === "failed" || qrisStatus === "deny" || qrisStatus === "cancel" ? (
+                <Button
+                  onClick={async () => {
+                    setIsQrisOpen(false);
+                    await prepareQris();
+                  }}
+                  disabled={loading}
+                >
+                  Buat QR Baru
+                </Button>
+              ) : (
+                <Button onClick={handleConfirmQrisPaid} disabled={loading} className="gap-2">
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                  {loading ? "Memeriksa..." : "Cek Pembayaran"}
+                </Button>
+              )}
             </div>
+
+            {qrisDemoMode && qrisStatus === "pending" && (
+              <div className="rounded-xl border border-dashed bg-muted/30 p-3 text-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">Mode Demo</Badge>
+                      <span className="text-xs text-muted-foreground">Tidak memindahkan dana nyata</span>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Gunakan konfirmasi ini setelah pelanggan mendemonstrasikan proses scan.
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={completeDemoQrisPayment}
+                    disabled={loading}
+                    className="shrink-0 gap-2"
+                  >
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Konfirmasi Dibayar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Pembayaran diproses melalui Xendit
+            </p>
           </div>
         </DialogContent>
       </Dialog>

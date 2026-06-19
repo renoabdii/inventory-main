@@ -30,6 +30,12 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Kategori wajib diisi'],
       trim: true,
     },
+    supplier: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Supplier',
+      default: null,
+      index: true,
+    },
     stock: {
       type: Number,
       required: true,
@@ -66,5 +72,8 @@ productSchema.virtual('status').get(function () {
 productSchema.index({ userId: 1, sku: 1 }, { unique: true, sparse: true });
 // Index untuk barcode juga per userId
 productSchema.index({ userId: 1, barcode: 1 }, { unique: true, sparse: true });
+productSchema.index({ userId: 1, category: 1, createdAt: -1 });
+productSchema.index({ userId: 1, supplier: 1, createdAt: -1 });
+productSchema.index({ userId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Product', productSchema, 'product');

@@ -32,7 +32,7 @@ const transactionSchema = new mongoose.Schema(
     changeAmount: { type: Number, required: true, default: 0 },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'debit', 'qris'],
+      enum: ['cash', 'qris'],
       default: 'cash',
     },
     cashier: {
@@ -60,5 +60,9 @@ transactionSchema.virtual('totalItems').get(function () {
 
 // Compound index: invoiceNumber unique per userId
 transactionSchema.index({ userId: 1, invoiceNumber: 1 }, { unique: true, sparse: true });
+transactionSchema.index({ userId: 1, createdAt: -1 });
+transactionSchema.index({ userId: 1, paymentMethod: 1, createdAt: -1 });
+transactionSchema.index({ cashier: 1, createdAt: -1 });
+transactionSchema.index({ shift: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema, 'transactions');

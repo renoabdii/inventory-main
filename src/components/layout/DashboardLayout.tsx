@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "./AppSidebar";
@@ -43,7 +43,7 @@ const DashboardLayout = ({ children, title = "Dashboard" }: DashboardLayoutProps
 
   const token = localStorage.getItem("token");
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/dashboard/notifications`, {
@@ -57,14 +57,14 @@ const DashboardLayout = ({ children, title = "Dashboard" }: DashboardLayoutProps
     } catch (error) {
       console.error("Error fetching notifications:", error);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     fetchNotifications();
     // Refresh setiap 30 detik
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [fetchNotifications]);
 
   const getNotifIcon = (type: string) => {
     switch (type) {

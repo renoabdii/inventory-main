@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 
 import { API_BASE_URL } from "@/lib/api";
 
@@ -110,6 +112,7 @@ const getStatusBadge = (status: string) => {
 const Category = () => {
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
@@ -126,12 +129,12 @@ const Category = () => {
   /* =========================
      FETCH CATEGORIES
   ========================= */
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
@@ -152,14 +155,14 @@ const Category = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, token]);
 
   /* =========================
      USEEFFECT
   ========================= */
   useEffect(() => {
     fetchCategories();
-  }, [searchQuery, currentPage, token]);
+  }, [fetchCategories]);
 
   /* =========================
      HANDLE INPUT
@@ -489,14 +492,7 @@ const Category = () => {
 
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="h-32 text-center text-muted-foreground"
-                      >
-                        Memuat data...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={5} />
                   ) : categories.length > 0 ? (
                     categories.map((item) => (
                       <TableRow key={item._id}>
@@ -571,7 +567,10 @@ const Category = () => {
                         colSpan={5}
                         className="h-32 text-center text-muted-foreground"
                       >
-                        Tidak ada kategori
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada kategori</p>
+                          <p className="text-sm">Buat kategori pertama agar produk bisa dikelompokkan.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}

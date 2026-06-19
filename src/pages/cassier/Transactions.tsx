@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import CashierLayout from "@/components/layout/CashierLayout";
 import TablePagination from "@/components/TablePagination";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,7 @@ interface TransactionData {
 const Transactions = () => {
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -36,12 +39,12 @@ const Transactions = () => {
   const token = localStorage.getItem("token");
   const user = JSON.parse(localStorage.getItem("user") || '{"username":"Kasir"}');
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       params.append("page", String(currentPage));
       params.append("limit", "8");
 
@@ -61,18 +64,17 @@ const Transactions = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, token]);
 
   useEffect(() => {
     fetchTransactions();
-  }, [searchQuery, currentPage, token]);
+  }, [fetchTransactions]);
 
   const getMethodBadge = (method: string) => {
     switch (method) {
       case "cash": return <Badge className="bg-emerald-500/10 text-emerald-500 border-0">Cash</Badge>;
-      case "debit": return <Badge className="bg-blue-500/10 text-blue-500 border-0">Debit</Badge>;
       case "qris": return <Badge className="bg-purple-500/10 text-purple-500 border-0">QRIS</Badge>;
-      default: return <Badge variant="secondary">{method}</Badge>;
+      default: return <Badge variant="secondary">Lainnya</Badge>;
     }
   };
 
@@ -190,9 +192,7 @@ const Transactions = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={8} />
                   ) : transactions.length > 0 ? (
                     transactions.map((t) => (
                       <TableRow key={t._id}>
@@ -219,7 +219,12 @@ const Transactions = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">Belum ada transaksi</TableCell>
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada transaksi</p>
+                          <p className="text-sm">Buka POS dan selesaikan penjualan pertama untuk mengisi riwayat.</p>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>

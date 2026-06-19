@@ -1,6 +1,12 @@
 const CashierShift = require('../models/CashierShift');
 const Transaction = require('../models/Transaction');
 
+const getOwnerUserId = (req) => {
+  if (req.user.role === 'admin') return req.user.id;
+  if (req.user.role === 'kasir') return req.user.adminId;
+  return req.user.id;
+};
+
 const buildShiftSummary = async (shiftId) => {
   const transactions = await Transaction.find({ shift: shiftId });
 
@@ -74,6 +80,7 @@ const openShift = async (req, res, next) => {
     }
 
     const shift = await CashierShift.create({
+      userId: getOwnerUserId(req),
       cashier: req.user._id,
       openingCash,
       note: req.body.note || '',
@@ -128,7 +135,8 @@ const closeShift = async (req, res, next) => {
 const getAll = async (req, res, next) => {
   try {
     const { page = 1, limit = 10 } = req.query;
-    const filter = {};
+    const ownerUserId = getOwnerUserId(req);
+    const filter = ownerUserId ? { userId: ownerUserId } : {};
 
     if (req.user.role === 'kasir') {
       filter.cashier = req.user._id;
@@ -145,9 +153,20 @@ const getAll = async (req, res, next) => {
       .skip(skip)
       .limit(limitNum);
 
+    const shiftsWithSummary = await Promise.all(
+      shifts.map(async (shift) => {
+        const summary = await buildShiftSummary(shift._id);
+        return {
+          ...shift.toObject(),
+          ...summary,
+          expectedCash: shift.openingCash + summary.cashSales,
+        };
+      })
+    );
+
     res.json({
       success: true,
-      data: shifts,
+      data: shiftsWithSummary,
       pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
     });
   } catch (error) {

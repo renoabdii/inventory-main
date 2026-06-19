@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 
 import { API_BASE_URL } from "@/lib/api";
 
@@ -112,6 +114,7 @@ const getStatusBadge = (status: string) => {
 const Suppliers = () => {
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
@@ -126,12 +129,12 @@ const Suppliers = () => {
   const token = localStorage.getItem("token");
 
   /* FETCH */
-  const fetchSuppliers = async () => {
+  const fetchSuppliers = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       params.append("page", String(currentPage));
       params.append("limit", "5");
 
@@ -152,11 +155,11 @@ const Suppliers = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, token]);
 
   useEffect(() => {
     fetchSuppliers();
-  }, [searchQuery, currentPage, token]);
+  }, [fetchSuppliers]);
 
   /* HANDLERS */
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -353,7 +356,7 @@ const Suppliers = () => {
           <CardContent>
             <div className="relative mb-6">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Cari supplier..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              <Input placeholder="Cari supplier..." className="pl-10" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }} />
             </div>
 
             <div className="rounded-xl border overflow-hidden">
@@ -370,9 +373,7 @@ const Suppliers = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={6} />
                   ) : suppliers.length > 0 ? (
                     suppliers.map((item) => (
                       <TableRow key={item._id}>
@@ -424,7 +425,12 @@ const Suppliers = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">Tidak ada supplier</TableCell>
+                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada supplier</p>
+                          <p className="text-sm">Tambahkan supplier agar produk dan purchase order bisa dihubungkan.</p>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>

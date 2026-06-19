@@ -1,12 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import TablePagination from "@/components/TablePagination";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useDebounce } from "@/hooks/useDebounce";
 
 import { API_BASE_URL } from "@/lib/api";
+import { formatCurrency, parseCurrencyInput } from "@/lib/currency";
 
 import {
   Card,
@@ -68,6 +72,7 @@ import {
   CheckCircle2,
   XCircle,
   ArrowRight,
+  MessageCircle,
 } from "lucide-react";
 
 /* =========================
@@ -84,7 +89,7 @@ interface POItem {
 interface PurchaseOrderData {
   _id: string;
   poNumber: string;
-  supplier: { _id: string; name: string; supplierId: string };
+  supplier: { _id: string; name: string; supplierId: string; phone?: string };
   items: POItem[];
   totalAmount: number;
   totalItems: number;
@@ -158,13 +163,40 @@ const getStatusBadge = (status: string) => {
   }
 };
 
-/* FORMAT RUPIAH */
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(value);
+const normalizeWhatsAppPhone = (phone?: string) => {
+  const cleaned = String(phone || "").replace(/\D/g, "");
+  if (!cleaned) return "";
+  if (cleaned.startsWith("0")) return `62${cleaned.slice(1)}`;
+  if (cleaned.startsWith("62")) return cleaned;
+  return cleaned;
+};
+
+const buildWhatsAppMessage = (order: PurchaseOrderData) => {
+  const itemLines = order.items
+    .map((item, index) => {
+      const subtotal = item.qty * item.price;
+      return `${index + 1}. ${item.productName} - ${item.qty} pcs x ${formatCurrency(item.price)} = ${formatCurrency(subtotal)}`;
+    })
+    .join("\n");
+
+  return [
+    `Halo ${order.supplier?.name || "Supplier"},`,
+    "",
+    "Kami ingin melakukan Purchase Order dengan detail berikut:",
+    "",
+    `No PO: ${order.poNumber}`,
+    `Tanggal: ${new Date(order.createdAt).toLocaleDateString("id-ID")}`,
+    "",
+    "Daftar Barang:",
+    itemLines,
+    "",
+    `Total: ${formatCurrency(order.totalAmount)}`,
+    "",
+    "Mohon konfirmasi ketersediaan barang dan estimasi pengiriman.",
+    "",
+    "Terima kasih.",
+    "Ely Berkah Mart",
+  ].join("\n");
 };
 
 /* =========================
@@ -175,14 +207,17 @@ const PurchaseOrders = () => {
   const location = useLocation();
   const { confirm, ConfirmDialogComponent } = useConfirmDialog();
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrderData[]>([]);
+  const [createdOrderPrompt, setCreatedOrderPrompt] = useState<PurchaseOrderData | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [statusDialog, setStatusDialog] = useState<{ id: string; event: string; label: string } | null>(null);
   const [statusNote, setStatusNote] = useState("");
   const [stats, setStats] = useState<POStats>({ total: 0, pending: 0, shipping: 0, completed: 0 });
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -202,12 +237,12 @@ const PurchaseOrders = () => {
   }, [location.search]);
 
   /* FETCH ORDERS */
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       if (statusFilter !== "all") params.append("status", statusFilter);
       params.append("page", String(currentPage));
       params.append("limit", "5");
@@ -229,13 +264,13 @@ const PurchaseOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, statusFilter, token]);
 
   /* FETCH SUPPLIERS */
-  const fetchSuppliers = async () => {
+  const fetchSuppliers = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/suppliers`, {
+      const res = await fetch(`${API_BASE_URL}/api/suppliers?limit=100`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -245,36 +280,68 @@ const PurchaseOrders = () => {
     } catch (error) {
       console.error("Error:", error);
     }
-  };
+  }, [token]);
 
   /* FETCH PRODUCTS */
-  const fetchProducts = async () => {
-    if (!token) return;
+  const fetchProducts = useCallback(async (supplierId: string) => {
+    if (!token || !supplierId) return;
+    setProductsLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/products`, {
+      const params = new URLSearchParams({
+        supplierId,
+        page: "1",
+        limit: "100",
+      });
+      const res = await fetch(`${API_BASE_URL}/api/products?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
-      if (json.success) setProducts(json.data);
+      if (json.success) {
+        setProducts(json.data);
+      } else {
+        setProducts([]);
+        toast.error(json.message || "Gagal memuat produk supplier");
+      }
     } catch (error) {
       console.error("Error:", error);
+      setProducts([]);
+      toast.error("Gagal memuat produk supplier");
+    } finally {
+      setProductsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchSuppliers();
-    fetchProducts();
   }, [token]);
 
   useEffect(() => {
+    fetchSuppliers();
+  }, [fetchSuppliers]);
+
+  useEffect(() => {
+    if (formData.supplierId) {
+      fetchProducts(formData.supplierId);
+    } else {
+      setProducts([]);
+      setProductsLoading(false);
+    }
+  }, [fetchProducts, formData.supplierId]);
+
+  useEffect(() => {
     fetchOrders();
-  }, [searchQuery, statusFilter, currentPage, token]);
+  }, [fetchOrders]);
 
   /* FORM HANDLERS */
+  const handleSupplierChange = (supplierId: string) => {
+    setFormData((prev) => ({ ...prev, supplierId }));
+    setProducts([]);
+    setFormItems([{ product: "", qty: "", price: "" }]);
+  };
+
   const handleItemChange = (index: number, field: string, value: string) => {
     setFormItems((prev) => {
       const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
+      updated[index] = {
+        ...updated[index],
+        [field]: field === "price" ? parseCurrencyInput(value) : value,
+      };
       // Auto-fill price from product
       if (field === "product") {
         const prod = products.find((p) => p._id === value);
@@ -320,6 +387,7 @@ const PurchaseOrders = () => {
       const json = await res.json();
       if (json.success) {
         toast.success("Purchase Order berhasil dibuat!");
+        setCreatedOrderPrompt(json.data);
         setFormData({ poNumber: "", supplierId: "", note: "" });
         setFormItems([{ product: "", qty: "", price: "" }]);
         setIsDialogOpen(false);
@@ -330,6 +398,47 @@ const PurchaseOrders = () => {
     } catch (error) {
       console.error("Error:", error);
       toast.error("Terjadi kesalahan");
+    }
+  };
+
+  const handleSendWhatsApp = async (id: string) => {
+    if (!token) return;
+
+    const popup = window.open("about:blank", "_blank");
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/purchase-orders/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+
+      if (!json.success) {
+        popup?.close();
+        toast.error(json.message || "Gagal mengambil detail PO");
+        return;
+      }
+
+      const order = json.data as PurchaseOrderData;
+      const phone = normalizeWhatsAppPhone(order.supplier?.phone);
+
+      if (!phone) {
+        popup?.close();
+        toast.warning("Nomor WhatsApp supplier belum diisi.");
+        return;
+      }
+
+      const message = buildWhatsAppMessage(order);
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+
+      if (popup) {
+        popup.location.href = url;
+      } else {
+        window.open(url, "_blank");
+      }
+    } catch (error) {
+      popup?.close();
+      console.error("Error:", error);
+      toast.error("Gagal membuka WhatsApp");
     }
   };
 
@@ -490,6 +599,29 @@ const PurchaseOrders = () => {
           </Card>
         </div>
 
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-5">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <p className="text-sm font-medium">1. Buat PO</p>
+                <p className="text-xs text-muted-foreground">Admin memilih supplier dan barang yang akan dipesan.</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium">2. Approve</p>
+                <p className="text-xs text-muted-foreground">PO disetujui sebelum barang dikirim supplier.</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium">3. Shipping</p>
+                <p className="text-xs text-muted-foreground">Barang sedang dalam proses pengiriman.</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium">4. Completed</p>
+                <p className="text-xs text-muted-foreground">Sistem membuat Barang Masuk dan menambah stok otomatis.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* TABLE */}
         <Card>
           <CardHeader>
@@ -522,7 +654,7 @@ const PurchaseOrders = () => {
                       </div>
                       <div className="space-y-2">
                         <Label>Supplier</Label>
-                        <Select value={formData.supplierId} onValueChange={(val) => setFormData((prev) => ({ ...prev, supplierId: val }))}>
+                        <Select value={formData.supplierId} onValueChange={handleSupplierChange}>
                           <SelectTrigger>
                             <SelectValue placeholder="Pilih supplier" />
                           </SelectTrigger>
@@ -550,16 +682,50 @@ const PurchaseOrders = () => {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <Label>Daftar Barang</Label>
-                        <Button type="button" variant="outline" size="sm" onClick={addItemRow}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={addItemRow}
+                          disabled={!formData.supplierId || productsLoading || products.length === 0}
+                        >
                           <Plus className="w-3 h-3 mr-1" /> Tambah Item
                         </Button>
                       </div>
+                      {!formData.supplierId && (
+                        <p className="text-sm text-muted-foreground">Pilih supplier dulu untuk melihat daftar produk.</p>
+                      )}
+                      {formData.supplierId && productsLoading && (
+                        <div className="space-y-2 rounded-lg border p-3">
+                          <Skeleton className="h-4 w-48" />
+                          <Skeleton className="h-10 w-full" />
+                        </div>
+                      )}
+                      {formData.supplierId && !productsLoading && products.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          Belum ada produk aktif yang dihubungkan dengan supplier ini. Hubungkan supplier di halaman Inventory terlebih dahulu.
+                        </p>
+                      )}
                       {formItems.map((item, index) => (
                         <div key={index} className="flex gap-2 items-end">
                           <div className="flex-1">
-                            <Select value={item.product} onValueChange={(val) => handleItemChange(index, "product", val)}>
+                            <Select
+                              value={item.product}
+                              onValueChange={(val) => handleItemChange(index, "product", val)}
+                              disabled={!formData.supplierId || productsLoading || products.length === 0}
+                            >
                               <SelectTrigger>
-                                <SelectValue placeholder="Pilih produk" />
+                                <SelectValue
+                                  placeholder={
+                                    formData.supplierId
+                                      ? productsLoading
+                                        ? "Memuat produk..."
+                                        : products.length > 0
+                                        ? "Pilih produk"
+                                        : "Belum ada produk supplier ini"
+                                      : "Pilih supplier dulu"
+                                  }
+                                />
                               </SelectTrigger>
                               <SelectContent>
                                 {products.map((p) => (
@@ -574,7 +740,12 @@ const PurchaseOrders = () => {
                             <Input type="number" placeholder="Qty" value={item.qty} onChange={(e) => handleItemChange(index, "qty", e.target.value)} />
                           </div>
                           <div className="w-28">
-                            <Input type="number" placeholder="Harga" value={item.price} onChange={(e) => handleItemChange(index, "price", e.target.value)} />
+                            <Input
+                              inputMode="numeric"
+                              placeholder="Rp 0"
+                              value={item.price ? formatCurrency(Number(item.price)) : ""}
+                              onChange={(e) => handleItemChange(index, "price", e.target.value)}
+                            />
                           </div>
                           {formItems.length > 1 && (
                             <Button type="button" variant="ghost" size="icon" className="h-10 w-10 text-red-500" onClick={() => removeItemRow(index)}>
@@ -598,7 +769,7 @@ const PurchaseOrders = () => {
             <div className="flex flex-col md:flex-row gap-3 mb-6">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Cari nomor PO atau supplier..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                <Input placeholder="Cari nomor PO atau supplier..." className="pl-10" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }} />
               </div>
               <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setCurrentPage(1); }}>
                 <SelectTrigger className="w-full md:w-48">
@@ -630,9 +801,7 @@ const PurchaseOrders = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">Memuat data...</TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={7} />
                   ) : orders.length > 0 ? (
                     orders.map((item) => (
                       <TableRow key={item._id}>
@@ -652,6 +821,13 @@ const PurchaseOrders = () => {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                className="gap-2"
+                                onClick={() => handleSendWhatsApp(item._id)}
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                                Kirim WhatsApp
+                              </DropdownMenuItem>
                               {getAvailableEvents(item.status).map((action) => (
                                 <DropdownMenuItem
                                   key={action.event}
@@ -678,7 +854,12 @@ const PurchaseOrders = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">Tidak ada purchase order</TableCell>
+                      <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                        <div className="space-y-1">
+                          <p className="font-medium text-foreground">Belum ada purchase order</p>
+                          <p className="text-sm">Buat PO pertama untuk proses restock dari supplier.</p>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
@@ -713,6 +894,42 @@ const PurchaseOrders = () => {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setStatusDialog(null)}>Batal</Button>
             <Button onClick={submitStatusDialog}>Simpan Status</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!createdOrderPrompt} onOpenChange={(open) => !open && setCreatedOrderPrompt(null)}>
+        <DialogContent className="sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle>PO Berhasil Dibuat</DialogTitle>
+            <DialogDescription>
+              Kirim detail purchase order ke supplier lewat WhatsApp sekarang.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border bg-muted/40 p-4">
+            <p className="text-sm text-muted-foreground">Nomor PO</p>
+            <p className="font-semibold">{createdOrderPrompt?.poNumber}</p>
+            <p className="mt-3 text-sm text-muted-foreground">Supplier</p>
+            <p className="font-semibold">{createdOrderPrompt?.supplier?.name || "-"}</p>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCreatedOrderPrompt(null)}>
+              Nanti
+            </Button>
+            <Button
+              className="gap-2"
+              onClick={() => {
+                if (createdOrderPrompt) {
+                  handleSendWhatsApp(createdOrderPrompt._id);
+                }
+                setCreatedOrderPrompt(null);
+              }}
+            >
+              <MessageCircle className="w-4 h-4" />
+              Kirim WhatsApp
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

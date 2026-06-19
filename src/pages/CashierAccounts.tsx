@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import TablePagination from "@/components/TablePagination";
+import { TableLoadingRows } from "@/components/LoadingState";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,8 +19,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Plus, Search, UserCog } from "lucide-react";
+import { Edit, KeyRound, Loader2, Plus, Search, UserCog } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
+import { getPasswordError } from "@/lib/password";
 
 interface CashierAccount {
   _id: string;
@@ -38,23 +41,27 @@ const initialForm = {
 const CashierAccounts = () => {
   const [cashiers, setCashiers] = useState<CashierAccount[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [editingCashier, setEditingCashier] = useState<CashierAccount | null>(null);
+  const [resetCashier, setResetCashier] = useState<CashierAccount | null>(null);
   const [formData, setFormData] = useState(initialForm);
+  const [resetPassword, setResetPassword] = useState("");
 
   const token = localStorage.getItem("token");
 
-  const fetchCashiers = async () => {
+  const fetchCashiers = useCallback(async () => {
     if (!token) return;
 
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
+      if (debouncedSearchQuery) params.append("search", debouncedSearchQuery);
       params.append("page", String(currentPage));
       params.append("limit", "8");
 
@@ -75,11 +82,11 @@ const CashierAccounts = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, debouncedSearchQuery, token]);
 
   useEffect(() => {
     fetchCashiers();
-  }, [searchQuery, currentPage, token]);
+  }, [fetchCashiers]);
 
   const openCreateDialog = () => {
     setEditingCashier(null);
@@ -97,6 +104,12 @@ const CashierAccounts = () => {
     setDialogOpen(true);
   };
 
+  const openResetDialog = (cashier: CashierAccount) => {
+    setResetCashier(cashier);
+    setResetPassword("");
+    setResetDialogOpen(true);
+  };
+
   const handleSubmit = async () => {
     if (!token) return;
 
@@ -111,6 +124,14 @@ const CashierAccounts = () => {
     if (!editingCashier && !password) {
       toast.warning("Password wajib diisi untuk akun baru");
       return;
+    }
+
+    if (password) {
+      const passwordError = getPasswordError(password);
+      if (passwordError) {
+        toast.warning(passwordError);
+        return;
+      }
     }
 
     setLoading(true);
@@ -150,6 +171,45 @@ const CashierAccounts = () => {
       fetchCashiers();
     } catch (error) {
       toast.error("Terjadi kesalahan saat menyimpan akun kasir");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!token || !resetCashier) return;
+
+    const password = resetPassword.trim();
+
+    const passwordError = getPasswordError(password);
+    if (passwordError) {
+      toast.warning(passwordError);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/cashier-accounts/${resetCashier._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password }),
+      });
+      const json = await res.json();
+
+      if (!json.success) {
+        toast.error(json.message || "Gagal reset password kasir");
+        return;
+      }
+
+      toast.success(`Password ${resetCashier.username} berhasil direset`);
+      setResetDialogOpen(false);
+      setResetCashier(null);
+      setResetPassword("");
+    } catch (error) {
+      toast.error("Terjadi kesalahan saat reset password kasir");
     } finally {
       setLoading(false);
     }
@@ -227,11 +287,7 @@ const CashierAccounts = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                        Memuat akun kasir...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRows columns={5} />
                   ) : cashiers.length > 0 ? (
                     cashiers.map((cashier) => (
                       <TableRow key={cashier._id}>
@@ -263,6 +319,9 @@ const CashierAccounts = () => {
                           <div className="flex items-center justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => toggleActive(cashier)}>
                               {cashier.isActive ? "Nonaktifkan" : "Aktifkan"}
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => openResetDialog(cashier)}>
+                              <KeyRound className="w-4 h-4" />
                             </Button>
                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(cashier)}>
                               <Edit className="w-4 h-4" />
@@ -345,7 +404,52 @@ const CashierAccounts = () => {
               Batal
             </Button>
             <Button onClick={handleSubmit} disabled={loading}>
-              {loading ? "Menyimpan..." : "Simpan"}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Menyimpan...
+                </span>
+              ) : (
+                "Simpan"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password Kasir</DialogTitle>
+            <DialogDescription>
+              Masukkan password baru untuk akun {resetCashier?.username || "kasir"}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label htmlFor="reset-password">Password baru</Label>
+            <Input
+              id="reset-password"
+              type="password"
+              value={resetPassword}
+              onChange={(event) => setResetPassword(event.target.value)}
+              placeholder="Minimal 6 karakter"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
+              Batal
+            </Button>
+            <Button onClick={handleResetPassword} disabled={loading}>
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Menyimpan...
+                </span>
+              ) : (
+                "Reset Password"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
