@@ -200,6 +200,25 @@ const POS = () => {
     }));
   };
 
+  const setCartQty = (productId: string, value: string) => {
+    const numericValue = Number(value.replace(/[^\d]/g, ""));
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return;
+    }
+
+    setCart(cart.map((item) => {
+      if (item.productId !== productId) return item;
+
+      if (numericValue > item.stock) {
+        toast.warning(`Stok ${item.name} hanya ${item.stock}`);
+        return { ...item, qty: item.stock };
+      }
+
+      return { ...item, qty: numericValue };
+    }));
+  };
+
   const removeFromCart = (productId: string) => {
     setCart(cart.filter((c) => c.productId !== productId));
   };
@@ -666,7 +685,13 @@ const POS = () => {
                         <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQty(item.productId, -1)}>
                           <Minus className="w-3 h-3" />
                         </Button>
-                        <span className="w-8 text-center text-sm font-bold">{item.qty}</span>
+                        <Input
+                          inputMode="numeric"
+                          className="h-8 w-14 px-1 text-center text-sm font-bold"
+                          value={item.qty}
+                          onChange={(e) => setCartQty(item.productId, e.target.value)}
+                          aria-label={`Jumlah ${item.name}`}
+                        />
                         <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => updateQty(item.productId, 1)}>
                           <Plus className="w-3 h-3" />
                         </Button>

@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const ForecastCache = require('../models/ForecastCache');
+const ForecastModel = require('../models/ForecastModel');
 
 const FORECAST_TIMEOUT_MS = Number(process.env.FORECAST_TIMEOUT_MS || 300000);
 const activeJobs = new Map();
@@ -82,6 +83,17 @@ const startForecastTraining = async (userId) => {
       },
       { upsert: true, new: true }
     );
+
+    await ForecastModel.findOneAndUpdate(
+      { userId },
+      {
+        $set: {
+          status: 'training',
+          error: null,
+        },
+      },
+      { upsert: true, new: true }
+    );
   } catch (error) {
     activeJobs.delete(jobKey);
     throw error;
@@ -89,6 +101,30 @@ const startForecastTraining = async (userId) => {
 
   const job = runPythonForecast(userId)
     .then(async (result) => {
+      const modelMetadata = result.stats?.model || null;
+
+      if (modelMetadata) {
+        await ForecastModel.findOneAndUpdate(
+          { userId },
+          {
+            status: modelMetadata.status || 'idle',
+            modelPath: modelMetadata.modelPath || '',
+            trainedAt: modelMetadata.trainedAt ? new Date(modelMetadata.trainedAt) : null,
+            dataStartDate: modelMetadata.dataStartDate ? new Date(modelMetadata.dataStartDate) : null,
+            dataEndDate: modelMetadata.dataEndDate ? new Date(modelMetadata.dataEndDate) : null,
+            epochs: modelMetadata.epochs,
+            sequenceLength: modelMetadata.sequenceLength,
+            horizon: modelMetadata.horizon,
+            maxProducts: modelMetadata.maxProducts,
+            productCount: modelMetadata.productCount,
+            productsTrained: modelMetadata.productsTrained,
+            method: result.stats?.method || null,
+            error: modelMetadata.error || null,
+          },
+          { upsert: true, new: true }
+        );
+      }
+
       if (result.stats?.lstmStatus === 'failed') {
         const cache = await ForecastCache.findOne({ userId }).select('data').lean();
         const update = {
@@ -126,6 +162,11 @@ const startForecastTraining = async (userId) => {
         { userId },
         { status: 'failed', error: error.message }
       );
+      await ForecastModel.findOneAndUpdate(
+        { userId },
+        { status: 'failed', error: error.message },
+        { upsert: true, new: true }
+      );
     })
     .finally(() => {
       activeJobs.delete(jobKey);
@@ -137,4 +178,14 @@ const startForecastTraining = async (userId) => {
 
 const isForecastTraining = (userId) => activeJobs.has(String(userId));
 
-module.exports = { startForecastTraining, isForecastTraining, resolveForecastJobStatus };
+const waitForForecastTraining = async (userId) => {
+  const job = activeJobs.get(String(userId));
+  if (job) await job;
+};
+
+module.exports = {
+  startForecastTraining,
+  isForecastTraining,
+  waitForForecastTraining,
+  resolveForecastJobStatus,
+};

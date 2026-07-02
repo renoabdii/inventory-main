@@ -3,6 +3,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const cors = require('cors');
 const connectDB = require('./config/database');
+const { initForecastScheduler } = require('./config/forecastScheduler');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 
@@ -14,7 +15,9 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Connect to MongoDB
-connectDB();
+connectDB().then(() => {
+  initForecastScheduler();
+});
 
 // Middleware
 app.use(cors());

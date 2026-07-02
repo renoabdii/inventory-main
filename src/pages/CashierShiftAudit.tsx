@@ -188,6 +188,7 @@ const CashierShiftAudit = () => {
                     <TableHead>Tutup</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Transaksi</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
                     <TableHead className="text-right">Cash</TableHead>
                     <TableHead className="text-right">QRIS</TableHead>
                     <TableHead className="text-right">Kas Sistem</TableHead>
@@ -197,7 +198,7 @@ const CashierShiftAudit = () => {
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableLoadingRows columns={10} />
+                    <TableLoadingRows columns={11} />
                   ) : shifts.length > 0 ? (
                     shifts.map((shift) => (
                       <TableRow key={shift._id}>
@@ -220,6 +221,7 @@ const CashierShiftAudit = () => {
                         <TableCell className="text-right font-medium">
                           {shift.totalTransactions}
                         </TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(shift.totalSales)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(shift.cashSales)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(shift.nonCashSales)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(shift.expectedCash)}</TableCell>
@@ -239,7 +241,7 @@ const CashierShiftAudit = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                      <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
                         <div className="space-y-1">
                           <p className="font-medium text-foreground">Belum ada shift kasir</p>
                           <p className="text-sm">Shift akan muncul setelah kasir membuka sesi kerja.</p>

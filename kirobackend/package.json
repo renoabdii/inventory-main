@@ -9,6 +9,7 @@
     "test": "node --test",
     "seed:admin": "node src/seeders/adminSeeder.js",
     "seed:kasir": "node src/seeders/kasirSeeder.js",
+    "seed:forecast-history": "node src/seeders/forecastHistorySeeder.js --apply",
     "assign:suppliers": "node scripts/assignProductSuppliers.js",
     "assign:suppliers:apply": "node scripts/assignProductSuppliers.js --apply"
   },

@@ -1,6 +1,7 @@
 const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
 const ForecastCache = require('../models/ForecastCache');
+const ForecastModel = require('../models/ForecastModel');
 const {
   startForecastTraining,
   isForecastTraining,
@@ -78,7 +79,10 @@ const buildMovingAverageForecast = async (userId) => {
 const getPrediction = async (req, res, next) => {
   try {
     const userId = getOwnerUserId(req);
-    const cache = await ForecastCache.findOne({ userId }).lean();
+    const [cache, model] = await Promise.all([
+      ForecastCache.findOne({ userId }).lean(),
+      ForecastModel.findOne({ userId }).lean(),
+    ]);
     const isTraining = isForecastTraining(userId);
     const cacheStatus = resolveForecastJobStatus(cache?.status, isTraining);
 
@@ -90,6 +94,7 @@ const getPrediction = async (req, res, next) => {
         status: cacheStatus,
         generatedAt: cache.generatedAt,
         error: cache.error || null,
+        model: model || null,
       });
     }
 
@@ -100,6 +105,7 @@ const getPrediction = async (req, res, next) => {
       status: cacheStatus,
       generatedAt: null,
       error: cache?.error || null,
+      model: model || null,
     });
   } catch (error) {
     next(error);
@@ -109,9 +115,12 @@ const getPrediction = async (req, res, next) => {
 const getPredictionStatus = async (req, res, next) => {
   try {
     const userId = getOwnerUserId(req);
-    const cache = await ForecastCache.findOne({ userId })
-      .select('status stats generatedAt error')
-      .lean();
+    const [cache, model] = await Promise.all([
+      ForecastCache.findOne({ userId })
+        .select('status stats generatedAt error')
+        .lean(),
+      ForecastModel.findOne({ userId }).lean(),
+    ]);
 
     return res.json({
       success: true,
@@ -120,6 +129,7 @@ const getPredictionStatus = async (req, res, next) => {
       lstmStatus: cache?.stats?.lstmStatus || null,
       generatedAt: cache?.generatedAt || null,
       error: cache?.error || null,
+      model: model || null,
     });
   } catch (error) {
     next(error);

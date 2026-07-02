@@ -16,13 +16,18 @@ import json
 import os
 import numpy as np
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Kurangi log TensorFlow agar stdout tetap JSON valid untuk backend Node.js.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-LSTM_MAX_PRODUCTS = int(os.getenv("FORECAST_LSTM_MAX_PRODUCTS", "3"))
+LSTM_MAX_PRODUCTS = int(os.getenv("FORECAST_LSTM_MAX_PRODUCTS", "20"))
 LSTM_EPOCHS = int(os.getenv("FORECAST_LSTM_EPOCHS", "6"))
 LSTM_FORECAST_HORIZON = int(os.getenv("FORECAST_LSTM_HORIZON", "30"))
 SEQUENCE_LENGTH = int(os.getenv("FORECAST_LSTM_SEQUENCE_LENGTH", "7"))
+MODEL_DIR = Path(os.getenv(
+    "FORECAST_MODEL_DIR",
+    Path(__file__).resolve().parent / "models"
+))
 
 try:
     from pymongo import MongoClient
@@ -142,6 +147,25 @@ def train_lstm_model(lstm_candidates):
         return None, "failed", str(error)
 
 
+def save_lstm_model(model, user_id):
+    """Simpan model hasil training dan kembalikan path relatif untuk metadata."""
+    if not model:
+        return None, None
+
+    try:
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        safe_user_id = "".join(ch for ch in str(user_id) if ch.isalnum() or ch in ("-", "_"))
+        model_path = MODEL_DIR / f"forecast-model-{safe_user_id}.keras"
+        model.save(model_path)
+
+        try:
+            return str(model_path.relative_to(Path(__file__).resolve().parents[2])), None
+        except ValueError:
+            return str(model_path), None
+    except Exception as error:
+        return None, str(error)
+
+
 def predict_with_trained_lstm(item, model):
     """Prediksi satu produk memakai model LSTM gabungan yang sudah dilatih."""
     daily_data = item["daily_data"]
@@ -255,6 +279,7 @@ def main():
         )[:LSTM_MAX_PRODUCTS]
         lstm_candidate_ids = {str(item["product_id"]) for item in lstm_candidates}
         lstm_model, lstm_status, lstm_error = train_lstm_model(lstm_candidates)
+        model_path, model_save_error = save_lstm_model(lstm_model, user_id) if lstm_status == "completed" else (None, None)
 
         results = []
 
@@ -304,6 +329,20 @@ def main():
             "method": "lstm" if any(r["method"] == "lstm" for r in results) else "moving_average",
             "lstmStatus": lstm_status,
             "lstmError": lstm_error,
+            "model": {
+                "status": "ready" if model_path else ("failed" if lstm_status == "failed" or model_save_error else "insufficient_data"),
+                "modelPath": model_path,
+                "trainedAt": datetime.now().isoformat() if model_path else None,
+                "dataStartDate": thirty_days_ago.isoformat(),
+                "dataEndDate": datetime.now().isoformat(),
+                "epochs": LSTM_EPOCHS,
+                "sequenceLength": SEQUENCE_LENGTH,
+                "horizon": LSTM_FORECAST_HORIZON,
+                "maxProducts": LSTM_MAX_PRODUCTS,
+                "productCount": len(products),
+                "productsTrained": len(lstm_candidates) if model_path else 0,
+                "error": model_save_error or lstm_error,
+            },
         }
         
         output = {"success": True, "data": results, "stats": stats}

@@ -16,6 +16,11 @@ dist-ssr
 __pycache__/
 *.py[cod]
 
+# Forecast model artifacts
+kirobackend/src/forecast/models/
+*.keras
+*.h5
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
