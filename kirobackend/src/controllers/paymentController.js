@@ -48,7 +48,15 @@ const xenditFetch = async (path, options = {}) => {
   const data = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    throw new Error(data?.message || data?.error_code || 'Request Xendit gagal');
+    const validationDetails = Array.isArray(data?.errors)
+      ? data.errors
+          .map((item) => `${item.path || 'field'}: ${item.message || 'tidak valid'}`)
+          .join('; ')
+      : '';
+    const message = [data?.message || data?.error_code || 'Request Xendit gagal', validationDetails]
+      .filter(Boolean)
+      .join(' Detail: ');
+    throw new Error(message);
   }
 
   return data;
