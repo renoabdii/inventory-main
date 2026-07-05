@@ -6,7 +6,7 @@
     "python": "3.11"
   },
   "steps": {
-    "install": {
+    "build": {
       "commands": [
         "...",
         "python3 -m pip install --upgrade pip",
