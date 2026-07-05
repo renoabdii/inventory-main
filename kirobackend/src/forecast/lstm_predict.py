@@ -143,6 +143,10 @@ def train_lstm_model(lstm_candidates):
         model.compile(optimizer="adam", loss="mse")
         model.fit(x_train, y_train, epochs=LSTM_EPOCHS, batch_size=4, verbose=0)
         return model, "completed", None
+    except ModuleNotFoundError as error:
+        return None, "unavailable", str(error)
+    except ImportError as error:
+        return None, "unavailable", str(error)
     except Exception as error:
         return None, "failed", str(error)
 

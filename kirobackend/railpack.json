@@ -10,7 +10,7 @@
       "commands": [
         "...",
         "python3 -m pip install --upgrade pip",
-        "python3 -m pip install -r src/forecast/requirements.txt --target src/forecast/.python_packages"
+        "if [ \"$FORECAST_INSTALL_FULL_LSTM\" = \"true\" ]; then python3 -m pip install -r src/forecast/requirements.txt --target src/forecast/.python_packages; else python3 -m pip install -r src/forecast/requirements.railway.txt --target src/forecast/.python_packages; fi"
       ]
     }
   },
