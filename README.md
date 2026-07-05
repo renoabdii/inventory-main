@@ -84,6 +84,56 @@ cd kirobackend/src/forecast
 pip install -r requirements.txt
 ```
 
+## Deploy Singkat
+
+Arsitektur yang paling aman untuk project ini:
+
+- Frontend: Vercel
+- Backend API: Render
+- Database: MongoDB Atlas
+
+### Frontend
+
+Isi environment variable berikut di hosting frontend:
+
+```bash
+VITE_API_URL=https://alamat-backend-kamu.onrender.com
+```
+
+Catatan:
+
+- File `vercel.json` sudah disiapkan agar routing SPA tetap masuk ke `index.html`.
+- Jika frontend dan backend disatukan dalam satu origin, `VITE_API_URL` bisa dikosongkan.
+
+### Backend
+
+Isi environment variable backend minimal:
+
+```bash
+PORT=3000
+NODE_ENV=production
+MONGODB_URI=
+JWT_SECRET=
+JWT_EXPIRES_IN=12h
+APP_PUBLIC_URL=https://alamat-backend-kamu.onrender.com
+FORECAST_AUTO_TRAIN_ENABLED=false
+XENDIT_SECRET_KEY=
+XENDIT_CALLBACK_TOKEN=
+XENDIT_CALLBACK_URL=https://alamat-backend-kamu.onrender.com/api/payments/xendit-callback
+```
+
+Jika fitur LSTM dipakai di hosting, server backend juga harus menyiapkan dependency Python dari:
+
+```bash
+kirobackend/src/forecast/requirements.txt
+```
+
+Saran awal untuk hosting gratis:
+
+- aktifkan forecast manual dulu
+- biarkan `FORECAST_AUTO_TRAIN_ENABLED=false`
+- nyalakan scheduler hanya jika resource server sudah cukup
+
 ## Akun Default
 
 | Role | Username | Password |

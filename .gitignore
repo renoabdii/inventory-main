@@ -35,3 +35,18 @@ kirobackend/src/forecast/models/
 # Environment files
 .env
 .env.local
+kirobackend/.env
+kirobackend/.env.local
+
+# Thesis/report artifacts
+docs/
+tmp/
+*.docx
+*.pdf
+
+# Local agent/tool folders
+.agents/
+.codex/
+.opencode/
+.playwright-mcp/
+.tmp/
