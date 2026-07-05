@@ -13,6 +13,17 @@ const resolveForecastJobStatus = (cacheStatus, isActive) => {
   return cacheStatus === 'training' ? 'failed' : (cacheStatus || 'idle');
 };
 
+const hasLstmResult = (cache) => (
+  cache?.stats?.method === 'lstm'
+  || cache?.stats?.lstmStatus === 'completed'
+  || cache?.data?.some((item) => item?.method === 'lstm')
+);
+
+const shouldPreserveLstmCache = (cache, result) => (
+  hasLstmResult(cache)
+  && ['failed', 'unavailable'].includes(result?.stats?.lstmStatus)
+);
+
 const runPythonForecast = (userId) => new Promise((resolve, reject) => {
   const pythonScript = path.join(__dirname, '..', 'forecast', 'lstm_predict.py');
   const python = spawn(PYTHON_BIN, [pythonScript, String(userId)], {
@@ -109,6 +120,9 @@ const startForecastTraining = async (userId) => {
   const job = runPythonForecast(userId)
     .then(async (result) => {
       const modelMetadata = result.stats?.model || null;
+      const existingCache = await ForecastCache.findOne({ userId })
+        .select('data stats generatedAt')
+        .lean();
 
       if (modelMetadata) {
         await ForecastModel.findOneAndUpdate(
@@ -132,15 +146,26 @@ const startForecastTraining = async (userId) => {
         );
       }
 
+      if (shouldPreserveLstmCache(existingCache, result)) {
+        await ForecastCache.findOneAndUpdate(
+          { userId },
+          {
+            status: 'completed',
+            error: null,
+          }
+        );
+        console.warn(`Forecast kept previous LSTM cache for user ${userId}: ${result.stats.lstmError || 'LSTM unavailable'}`);
+        return;
+      }
+
       if (result.stats?.lstmStatus === 'failed') {
-        const cache = await ForecastCache.findOne({ userId }).select('data').lean();
         const update = {
           status: 'failed',
           error: result.stats.lstmError || 'Training LSTM gagal',
         };
 
         // Jika belum ada cache lama, simpan fallback agar halaman tetap berguna.
-        if (!cache?.data?.length) {
+        if (!existingCache?.data?.length) {
           update.data = result.data;
           update.stats = result.stats;
           update.generatedAt = new Date();
@@ -195,4 +220,5 @@ module.exports = {
   isForecastTraining,
   waitForForecastTraining,
   resolveForecastJobStatus,
+  shouldPreserveLstmCache,
 };
