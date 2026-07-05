@@ -326,13 +326,16 @@ def main():
         results.sort(key=lambda x: x["predictedDays"])
         
         # Stats
+        display_lstm_error = None if lstm_status == "unavailable" else lstm_error
+        display_model_error = model_save_error or display_lstm_error
+
         stats = {
             "safe": len([r for r in results if r["status"] == "SAFE"]),
             "restock": len([r for r in results if r["status"] == "RESTOCK"]),
             "critical": len([r for r in results if r["status"] == "CRITICAL"]),
             "method": "lstm" if any(r["method"] == "lstm" for r in results) else "moving_average",
             "lstmStatus": lstm_status,
-            "lstmError": lstm_error,
+            "lstmError": display_lstm_error,
             "model": {
                 "status": "ready" if model_path else ("failed" if lstm_status == "failed" or model_save_error else "insufficient_data"),
                 "modelPath": model_path,
@@ -345,7 +348,7 @@ def main():
                 "maxProducts": LSTM_MAX_PRODUCTS,
                 "productCount": len(products),
                 "productsTrained": len(lstm_candidates) if model_path else 0,
-                "error": model_save_error or lstm_error,
+                "error": display_model_error,
             },
         }
         

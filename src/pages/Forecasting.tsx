@@ -55,7 +55,7 @@ interface ForecastStats {
   restock: number;
   critical: number;
   method: string;
-  lstmStatus?: "completed" | "insufficient_data" | "failed";
+  lstmStatus?: "completed" | "insufficient_data" | "failed" | "unavailable";
   lstmError?: string | null;
 }
 
@@ -262,11 +262,6 @@ const Forecast = () => {
                 </p>
               </div>
             </div>
-            {modelMetadata?.error && (
-              <p className="mt-4 text-sm text-red-500">
-                Prediksi tetap ditampilkan dengan data yang tersedia. Detail error: {modelMetadata.error}
-              </p>
-            )}
           </CardContent>
         </Card>
 
