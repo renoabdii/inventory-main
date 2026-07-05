@@ -224,7 +224,7 @@ const createQris = async (req, res, next) => {
     const xenditResponse = await xenditFetch('/qr_codes', {
       method: 'POST',
       body: JSON.stringify({
-        external_id: orderId,
+        reference_id: orderId,
         type: 'DYNAMIC',
         currency: 'IDR',
         amount: totalAmount,
