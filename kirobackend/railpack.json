@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "packages": {
+    "node": "22",
+    "python": "3.11"
+  },
+  "steps": {
+    "install": {
+      "commands": [
+        "...",
+        "python3 -m pip install --upgrade pip",
+        "python3 -m pip install -r src/forecast/requirements.txt --target src/forecast/.python_packages"
+      ]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm start"
+  }
+}

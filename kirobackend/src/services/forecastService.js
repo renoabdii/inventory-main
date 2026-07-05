@@ -5,6 +5,7 @@ const ForecastModel = require('../models/ForecastModel');
 
 const FORECAST_TIMEOUT_MS = Number(process.env.FORECAST_TIMEOUT_MS || 300000);
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
+const PYTHON_VENDOR_PATH = path.join(__dirname, '..', 'forecast', '.python_packages');
 const activeJobs = new Map();
 
 const resolveForecastJobStatus = (cacheStatus, isActive) => {
@@ -16,7 +17,12 @@ const runPythonForecast = (userId) => new Promise((resolve, reject) => {
   const pythonScript = path.join(__dirname, '..', 'forecast', 'lstm_predict.py');
   const python = spawn(PYTHON_BIN, [pythonScript, String(userId)], {
     cwd: path.join(__dirname, '..', '..'),
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      PYTHONPATH: process.env.PYTHONPATH
+        ? `${PYTHON_VENDOR_PATH}${path.delimiter}${process.env.PYTHONPATH}`
+        : PYTHON_VENDOR_PATH,
+    },
   });
 
   let output = '';
