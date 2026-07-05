@@ -224,12 +224,10 @@ const createQris = async (req, res, next) => {
     const xenditResponse = await xenditFetch('/qr_codes', {
       method: 'POST',
       body: JSON.stringify({
-        reference_id: orderId,
+        external_id: orderId,
         type: 'DYNAMIC',
-        currency: 'IDR',
         amount: totalAmount,
         callback_url: process.env.XENDIT_CALLBACK_URL || `${process.env.APP_PUBLIC_URL || ''}/api/payments/xendit-callback`,
-        expires_at: expiredAt.toISOString(),
       }),
     });
 
