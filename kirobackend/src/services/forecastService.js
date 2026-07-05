@@ -4,6 +4,7 @@ const ForecastCache = require('../models/ForecastCache');
 const ForecastModel = require('../models/ForecastModel');
 
 const FORECAST_TIMEOUT_MS = Number(process.env.FORECAST_TIMEOUT_MS || 300000);
+const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
 const activeJobs = new Map();
 
 const resolveForecastJobStatus = (cacheStatus, isActive) => {
@@ -13,7 +14,7 @@ const resolveForecastJobStatus = (cacheStatus, isActive) => {
 
 const runPythonForecast = (userId) => new Promise((resolve, reject) => {
   const pythonScript = path.join(__dirname, '..', 'forecast', 'lstm_predict.py');
-  const python = spawn('python', [pythonScript, String(userId)], {
+  const python = spawn(PYTHON_BIN, [pythonScript, String(userId)], {
     cwd: path.join(__dirname, '..', '..'),
     env: { ...process.env },
   });
@@ -43,7 +44,7 @@ const runPythonForecast = (userId) => new Promise((resolve, reject) => {
   });
 
   python.on('error', (error) => {
-    finish(reject, new Error(`Python spawn error: ${error.message}`));
+    finish(reject, new Error(`Python spawn error (${PYTHON_BIN}): ${error.message}`));
   });
 
   python.on('close', (code) => {

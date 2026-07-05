@@ -128,6 +128,12 @@ Jika fitur LSTM dipakai di hosting, server backend juga harus menyiapkan depende
 kirobackend/src/forecast/requirements.txt
 ```
 
+Untuk Railway, konfigurasi `kirobackend/nixpacks.toml` sudah menyiapkan Node.js, Python 3, dan dependency Python tersebut. Tambahkan juga environment variable berikut pada backend:
+
+```bash
+PYTHON_BIN=python3
+```
+
 Saran awal untuk hosting gratis:
 
 - aktifkan forecast manual dulu
