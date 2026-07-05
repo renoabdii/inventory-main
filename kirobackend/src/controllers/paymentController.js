@@ -31,6 +31,19 @@ const getXenditConfig = () => {
   };
 };
 
+const sanitizeEnvUrl = (value) => {
+  const cleaned = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+  return cleaned.replace(/\/+$/, '');
+};
+
+const getXenditCallbackUrl = () => {
+  const explicitCallbackUrl = sanitizeEnvUrl(process.env.XENDIT_CALLBACK_URL);
+  if (explicitCallbackUrl) return explicitCallbackUrl;
+
+  const publicUrl = sanitizeEnvUrl(process.env.APP_PUBLIC_URL);
+  return publicUrl ? `${publicUrl}/api/payments/xendit-callback` : '';
+};
+
 const xenditFetch = async (path, options = {}) => {
   const { apiKey, baseUrl } = getXenditConfig();
   const auth = Buffer.from(`${apiKey}:`).toString('base64');
@@ -228,6 +241,7 @@ const createQris = async (req, res, next) => {
 
     const orderId = generateOrderId();
     const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+    const callbackUrl = getXenditCallbackUrl();
 
     const xenditResponse = await xenditFetch('/qr_codes', {
       method: 'POST',
@@ -235,7 +249,7 @@ const createQris = async (req, res, next) => {
         external_id: orderId,
         type: 'DYNAMIC',
         amount: totalAmount,
-        callback_url: process.env.XENDIT_CALLBACK_URL || `${process.env.APP_PUBLIC_URL || ''}/api/payments/xendit-callback`,
+        callback_url: callbackUrl,
       }),
     });
 
@@ -360,7 +374,7 @@ const simulatePaid = async (req, res, next) => {
       source: 'local_sandbox_callback',
     };
 
-    const callbackUrl = process.env.XENDIT_CALLBACK_URL;
+    const callbackUrl = getXenditCallbackUrl();
 
     if (callbackUrl) {
       const { callbackToken } = getXenditConfig();
