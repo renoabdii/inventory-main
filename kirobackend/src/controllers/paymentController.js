@@ -44,6 +44,12 @@ const getXenditCallbackUrl = () => {
   return publicUrl ? `${publicUrl}/api/payments/xendit-callback` : '';
 };
 
+const isQrisSimulationEnabled = () => {
+  if (process.env.QRIS_SIMULATION_ENABLED === 'true') return true;
+  if (process.env.QRIS_SIMULATION_ENABLED === 'false') return false;
+  return process.env.NODE_ENV !== 'production';
+};
+
 const xenditFetch = async (path, options = {}) => {
   const { apiKey, baseUrl } = getXenditConfig();
   const auth = Buffer.from(`${apiKey}:`).toString('base64');
@@ -288,7 +294,7 @@ const createQris = async (req, res, next) => {
         status: payment.status,
         totalAmount: payment.totalAmount,
         expiredAt: payment.expiredAt,
-        simulationEnabled: process.env.NODE_ENV !== 'production',
+        simulationEnabled: isQrisSimulationEnabled(),
       },
     });
   } catch (error) {
@@ -353,8 +359,8 @@ const notification = async (req, res, next) => {
 
 const simulatePaid = async (req, res, next) => {
   try {
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(403).json({ success: false, message: 'Simulasi pembayaran tidak tersedia di production' });
+    if (!isQrisSimulationEnabled()) {
+      return res.status(403).json({ success: false, message: 'Simulasi pembayaran tidak tersedia' });
     }
 
     const userId = getOwnerUserId(req);
